@@ -75,6 +75,10 @@ GEM
       irb (>= 1.3.6)
       reline (>= 0.3.1)
     digest (3.1.0)
+    dotenv (2.8.1)
+    dotenv-rails (2.8.1)
+      dotenv (= 2.8.1)
+      railties (>= 3.2)
     erubi (1.10.0)
     globalid (1.0.0)
       activesupport (>= 5.0)
@@ -98,6 +102,7 @@ GEM
     mini_portile2 (2.8.0)
     minitest (5.16.2)
     msgpack (1.5.4)
+    mysql2 (0.5.4)
     net-imap (0.2.3)
       digest
       net-protocol
@@ -168,7 +173,9 @@ PLATFORMS
 DEPENDENCIES
   bootsnap
   debug
+  dotenv-rails
   graphql-client
+  mysql2
   puma (~> 5.0)
   rails (~> 7.0.3, >= 7.0.3.1)
   sqlite3 (~> 1.4)

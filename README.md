@@ -1,24 +1,80 @@
-# README
+# instance-info-api
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+Get fediverse server type by REST API.
 
-Things you may want to cover:
+- Return instance type (e.g. mastodon, misskey, friendica, pixelfed, ...)
+- Support some non-fediverse SNS (e.g. twitter, facebook, ...)
+- Create cache
 
-* Ruby version
+## Request to hosted services
 
-* System dependencies
+```
+GET https://anypost.dev/api/v1/instances/<instance-name>
+```
 
-* Configuration
+Example of response:
 
-* Database creation
+- GET https://anypost.dev/api/v1/instances/mastodon.cloud
 
-* Database initialization
+`{"name":"mastodon.cloud","type":"mastodon","source":"cache"}`
 
-* How to run the test suite
+- GET https://anypost.dev/api/v1/instances/misskey.io
 
-* Services (job queues, cache servers, search engines, etc.)
+`{"name":"misskey.io","type":"misskey","source":"fediverse.observer"}`
 
-* Deployment instructions
+- GET https://anypost.dev/api/v1/instances/twitter.com
 
-* ...
+`{"name":"twitter.com","type":"twitter","source":"cache"}`
+
+## Run your own environments
+
+## Pre-requirements
+
+- Ruby 2.7
+- Rails 7.0
+- MySQL 8.0
+
+### Install
+
+```
+$ git clone https://github.com/highemerly/instance-info-api
+$ cd instance-info-api
+$ bundle install
+```
+
+### Prepare database
+
+If you use `instanceapi` database and `instanceapiuser` user in local databases,
+
+```
+$ mysql -u root
+> CREATE DATABASE instanceapi
+> CREATE USER 'instanceapiuser'@'localhost' IDENTIFIED BY '*********'
+> GRANT ALL ON instanceapiuser.* TO 'instanceapi'@'localhost';
+```
+
+In addition, create `.env` files for your environments.
+
+```
+$ vi .env.production
+
+DB_HOST = 'localhost'
+DB_NAME = 'instanceapi'
+DB_USER = 'instanceapiuser'
+DB_PASS = '*********'
+
+$ RAILS_ENV=production bundle exec rails db:seed
+$ RAILS_ENV=production bundle exec rails db:migrate
+```
+
+### Run
+
+```
+$ RAILS_ENV=production bundle exec rails server
+```
+
+Then, `curl http://localhost:3000/api/v1/instances/<instance-name>` may be respond desirable json.
+
+## License
+
+See `./LICENSE`

@@ -28,7 +28,7 @@ Example of response:
 
 ## Run your own environments
 
-## Pre-requirements
+### Pre-requirements
 
 - Ruby 2.7
 - Rails 7.0
@@ -42,15 +42,28 @@ $ cd instance-info-api
 $ bundle install
 ```
 
+### Create secret key SECRET_KEY_BASE
+
+Create secret_key_base in your environments.
+
+```
+$ RAILS_ENV=production bundle exec rake secret
+  <xxxxxxxxxxxxxxxx>   # <- remember it
+$ cp .env.sample .env.production
+$ vi .env.production
+
+SECRET_KEY_BASE='<xxxxxxxxxxxxxxxx>'
+```
+
 ### Prepare database
 
 If you use `instanceapi` database and `instanceapiuser` user in local databases,
 
 ```
 $ mysql -u root
-> CREATE DATABASE instanceapi
-> CREATE USER 'instanceapiuser'@'localhost' IDENTIFIED BY '*********'
-> GRANT ALL ON instanceapiuser.* TO 'instanceapi'@'localhost';
+> CREATE DATABASE instanceapi;
+> CREATE USER 'instanceapiuser'@'localhost' IDENTIFIED BY '*********';
+> GRANT ALL ON instanceapi.* TO 'instanceapiuser'@'localhost';
 ```
 
 In addition, create `.env` files for your environments.
@@ -63,8 +76,8 @@ DB_NAME = 'instanceapi'
 DB_USER = 'instanceapiuser'
 DB_PASS = '*********'
 
-$ RAILS_ENV=production bundle exec rails db:seed
 $ RAILS_ENV=production bundle exec rails db:migrate
+$ RAILS_ENV=production bundle exec rails db:seed
 ```
 
 ### Run

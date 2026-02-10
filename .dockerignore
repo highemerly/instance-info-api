@@ -1,0 +1,11 @@
+.git
+.gitignore
+.DS_Store
+log/*
+tmp/*
+storage/*
+.env*
+!.env.sample
+vendor/bundle
+node_modules
+*.log

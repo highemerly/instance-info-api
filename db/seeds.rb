@@ -13,6 +13,7 @@ instances = [
   ["line.me", "line"],
   ["line", "line"],
   ["b.hatena.ne.jp", "hatenabookmark"],
+  ["hatena.ne.jp", "hatenabookmark"],
   ["getpocket.com", "pocket"],
   ["pocket", "pocket"],
   ["linkedin.com", "linkedin"],
@@ -22,6 +23,7 @@ instances = [
   ["pinterest.jp", "pinterest"],
   ["www.pinterest.jp", "pinterest"],
   ["www.xing.com", "xing"],
+  ["xing.com", "xing"],
 ]
 
 instances.each do |name, type|

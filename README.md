@@ -3,6 +3,7 @@
 Get fediverse server type by REST API.
 
 - Return instance type (e.g. mastodon, misskey, friendica, pixelfed, ...)
+- Return software version, total users, and status for fediverse instances
 - Support some non-fediverse SNS (e.g. twitter, facebook, ...)
 - Create cache
 
@@ -16,15 +17,20 @@ Example of response:
 
 - GET https://anypost.dev/api/v1/instances/mastodon.cloud
 
-`{"name":"mastodon.cloud","type":"mastodon","source":"cache"}`
+`{"name":"mastodon.cloud","type":"mastodon","version":"4.3.2","total_users":12345,"status":1,"source":"cache"}`
 
 - GET https://anypost.dev/api/v1/instances/misskey.io
 
-`{"name":"misskey.io","type":"misskey","source":"fediverse.observer"}`
+`{"name":"misskey.io","type":"misskey","version":"2025.3.1","total_users":98765,"status":1,"source":"fediverse.observer"}`
 
 - GET https://anypost.dev/api/v1/instances/twitter.com
 
-`{"name":"twitter.com","type":"twitter","source":"cache"}`
+`{"name":"twitter.com","type":"twitter","source":"builtin"}`
+
+`version`, `total_users`, and `status` come from fediverse.observer's GraphQL `node`
+(`fullversion`, `total_users`, `status`). `status` is an integer (`1` = up). These
+fields are omitted from the response when not available (e.g. non-fediverse cached
+entries such as `twitter.com`).
 
 ## Run your own environments
 

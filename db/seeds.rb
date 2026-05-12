@@ -8,6 +8,7 @@
 
 instances = [
   ["twitter.com", "twitter"],
+  ["x.com", "twitter"],
   ["facebook.com", "facebook"],
   ["www.facebook.com", "facebook"],
   ["line.me", "line"],
@@ -24,6 +25,21 @@ instances = [
   ["www.pinterest.jp", "pinterest"],
   ["www.xing.com", "xing"],
   ["xing.com", "xing"],
+  ["www.threads.net", "threads"],
+  ["threads.net", "threads"],
+  ["www.threads.com", "threads"],
+  ["threads.com", "threads"],
+  ["bsky.app", "bluesky"],
+  ["bluesky", "bluesky"],
+  ["www.reddit.com", "reddit"],
+  ["reddit.com", "reddit"],
+  ["reddit", "reddit"],
+  ["www.whatsapp.com", "whatsapp"],
+  ["whatsapp.com", "whatsapp"],
+  ["wa.me", "whatsapp"],
+  ["whatsapp", "whatsapp"],
+  ["telegram.org", "telegram"],
+  ["telegram", "telegram"],
 ]
 
 instances.each do |name, type|

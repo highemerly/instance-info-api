@@ -12,6 +12,9 @@ module Api
 
         instance_name = params[:name]
         instance_type = ""
+        instance_version = nil
+        instance_total_users = nil
+        instance_status = nil
         source = ""
 
         instance = Instance.find_by(name: instance_name)
@@ -19,24 +22,32 @@ module Api
         unless instance == nil then
           unless stale_cache?(instance) then
             instance_type = instance[:instance_type]
-            source = "cache"
+            instance_version = instance[:version]
+            instance_total_users = instance[:total_users]
+            instance_status = instance[:status]
+            source = instance[:permanent] ? "builtin" : "cache"
           else
             graphQL_result = SWAPI::Client.query(SWAPI::Query, variables: {domain: instance_name})
 
             if graphQL_result.data.node.length == 0 then
               instance_type = instance[:instance_type]
+              instance_version = instance[:version]
+              instance_total_users = instance[:total_users]
+              instance_status = instance[:status]
               source = "cache:cache-stale"
             else
-              graphQL_result.data.node.each do |type|
-                if type.softwarename == instance[:instance_type] then
-                  instance_type = instance[:instance_type]
+              graphQL_result.data.node.each do |node|
+                instance_type = node.softwarename
+                instance_version = node.fullversion
+                instance_total_users = node.total_users
+                instance_status = node.status
+
+                if node.softwarename == instance[:instance_type] then
                   source = "fediverse.observer:cache-revalidated"
-                  instance.touch
                 else
-                  instance_type = type.softwarename
                   source = "fediverse.observer:cache-refleshed"
-                  Instance.update(instance[:id], name: instance_name, instance_type: instance_type, version: "")
                 end
+                Instance.update(instance[:id], name: instance_name, instance_type: instance_type, version: instance_version, total_users: instance_total_users, status: instance_status)
               end
             end
           end
@@ -57,10 +68,13 @@ module Api
           result = SWAPI::Client.query(SWAPI::Query, variables: {domain: instance_name})
 
           unless result.data.node.length == 0 then
-            result.data.node.each do |type|
-              instance_type = type.softwarename
+            result.data.node.each do |node|
+              instance_type = node.softwarename
+              instance_version = node.fullversion
+              instance_total_users = node.total_users
+              instance_status = node.status
               source = "fediverse.observer"
-              Instance.create(name: instance_name, instance_type: instance_type, version: "")
+              Instance.create(name: instance_name, instance_type: instance_type, version: instance_version, total_users: instance_total_users, status: instance_status)
             end
           else
             instance_type = "unknown"
@@ -69,17 +83,18 @@ module Api
           end
         end
 
-        render status: 200, json: response_json(instance_name, instance_type, source)
+        render status: 200, json: response_json(instance_name, instance_type, instance_version, instance_total_users, instance_status, source)
       end
 
       private
 
-      def response_json(name, type, source)
-        if source == "" then
-          {name: name, type: type}
-        else
-          {name: name, type: type, source: source}
-        end
+      def response_json(name, type, version, total_users, status, source)
+        json = { name: name, type: type }
+        json[:version] = version if version.present?
+        json[:total_users] = total_users unless total_users.nil?
+        json[:status] = status unless status.nil?
+        json[:source] = source unless source == ""
+        json
       end
 
       def stale_cache?(instance)
@@ -104,6 +119,9 @@ module SWAPI
   query($domain: String!) {
     node(domain: $domain) {
       softwarename
+      fullversion
+      total_users
+      status
     }
   }
   GRAPHQL

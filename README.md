@@ -3,6 +3,7 @@
 Get fediverse server type by REST API.
 
 - Return instance type (e.g. mastodon, misskey, friendica, pixelfed, ...)
+- Return the specific software fork in a separate `software` field (e.g. `type=pleroma, software=akkoma`)
 - Return software version, total users, and status for fediverse instances
 - Support some non-fediverse SNS (e.g. twitter, facebook, ...)
 - Create cache
@@ -17,20 +18,30 @@ Example of response:
 
 - GET https://anypost.dev/api/v1/instances/mastodon.cloud
 
-`{"name":"mastodon.cloud","type":"mastodon","version":"4.3.2","total_users":12345,"status":1,"source":"cache"}`
+`{"name":"mastodon.cloud","type":"mastodon","software":"mastodon","version":"4.3.2","total_users":12345,"status":1,"source":"cache"}`
 
 - GET https://anypost.dev/api/v1/instances/misskey.io
 
-`{"name":"misskey.io","type":"misskey","version":"2025.3.1","total_users":98765,"status":1,"source":"fediverse.observer"}`
+`{"name":"misskey.io","type":"misskey","software":"misskey","version":"2025.3.1","total_users":98765,"status":1,"source":"fediverse.observer"}`
+
+- GET https://anypost.dev/api/v1/instances/some-akkoma-instance.example
+
+`{"name":"some-akkoma-instance.example","type":"pleroma","software":"akkoma","version":"3.x","total_users":42,"status":1,"source":"fediverse.observer"}`
 
 - GET https://anypost.dev/api/v1/instances/twitter.com
 
 `{"name":"twitter.com","type":"twitter","source":"builtin"}`
 
+`type` is the canonical fediverse family (e.g. `mastodon`, `pleroma`, `misskey`,
+`lemmy`). `software` is the specific implementation as reported by
+fediverse.observer (e.g. `akkoma`, `firefish`, `sharkey`, `fedibird`). When a
+fork is not yet mapped in `config/software_families.yml`, `type` falls back to
+the raw softwarename so no information is lost.
+
 `version`, `total_users`, and `status` come from fediverse.observer's GraphQL `node`
 (`fullversion`, `total_users`, `status`). `status` is an integer (`1` = up). These
-fields are omitted from the response when not available (e.g. non-fediverse cached
-entries such as `twitter.com`).
+fields, along with `software`, are omitted from the response when not available
+(e.g. non-fediverse cached entries such as `twitter.com`).
 
 ## Run your own environments
 

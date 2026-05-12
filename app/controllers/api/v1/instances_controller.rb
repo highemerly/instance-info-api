@@ -12,6 +12,7 @@ module Api
 
         instance_name = params[:name]
         instance_type = ""
+        instance_software = nil
         instance_version = nil
         instance_total_users = nil
         instance_status = nil
@@ -22,6 +23,7 @@ module Api
         unless instance == nil then
           unless stale_cache?(instance) then
             instance_type = instance[:instance_type]
+            instance_software = instance[:software]
             instance_version = instance[:version]
             instance_total_users = instance[:total_users]
             instance_status = instance[:status]
@@ -31,23 +33,25 @@ module Api
 
             if graphQL_result.data.node.length == 0 then
               instance_type = instance[:instance_type]
+              instance_software = instance[:software]
               instance_version = instance[:version]
               instance_total_users = instance[:total_users]
               instance_status = instance[:status]
               source = "cache:cache-stale"
             else
               graphQL_result.data.node.each do |node|
-                instance_type = node.softwarename
+                instance_software = node.softwarename
+                instance_type = SoftwareFamilies.normalize(node.softwarename)
                 instance_version = node.fullversion
                 instance_total_users = node.total_users
                 instance_status = node.status
 
-                if node.softwarename == instance[:instance_type] then
+                if node.softwarename == instance[:software] then
                   source = "fediverse.observer:cache-revalidated"
                 else
                   source = "fediverse.observer:cache-refleshed"
                 end
-                Instance.update(instance[:id], name: instance_name, instance_type: instance_type, version: instance_version, total_users: instance_total_users, status: instance_status)
+                Instance.update(instance[:id], name: instance_name, instance_type: instance_type, software: instance_software, version: instance_version, total_users: instance_total_users, status: instance_status)
               end
             end
           end
@@ -69,12 +73,13 @@ module Api
 
           unless result.data.node.length == 0 then
             result.data.node.each do |node|
-              instance_type = node.softwarename
+              instance_software = node.softwarename
+              instance_type = SoftwareFamilies.normalize(node.softwarename)
               instance_version = node.fullversion
               instance_total_users = node.total_users
               instance_status = node.status
               source = "fediverse.observer"
-              Instance.create(name: instance_name, instance_type: instance_type, version: instance_version, total_users: instance_total_users, status: instance_status)
+              Instance.create(name: instance_name, instance_type: instance_type, software: instance_software, version: instance_version, total_users: instance_total_users, status: instance_status)
             end
           else
             instance_type = "unknown"
@@ -83,13 +88,14 @@ module Api
           end
         end
 
-        render status: 200, json: response_json(instance_name, instance_type, instance_version, instance_total_users, instance_status, source)
+        render status: 200, json: response_json(instance_name, instance_type, instance_software, instance_version, instance_total_users, instance_status, source)
       end
 
       private
 
-      def response_json(name, type, version, total_users, status, source)
+      def response_json(name, type, software, version, total_users, status, source)
         json = { name: name, type: type }
+        json[:software] = software if software.present?
         json[:version] = version if version.present?
         json[:total_users] = total_users unless total_users.nil?
         json[:status] = status unless status.nil?

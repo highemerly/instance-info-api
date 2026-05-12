@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.0].define(version: 2022_08_03_124700) do
+ActiveRecord::Schema[8.0].define(version: 2026_05_13_120000) do
   create_table "instances", force: :cascade do |t|
     t.string "name"
     t.string "instance_type"
@@ -18,6 +18,9 @@ ActiveRecord::Schema[7.0].define(version: 2022_08_03_124700) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.boolean "permanent"
+    t.integer "total_users"
+    t.integer "status"
+    t.string "software"
   end
 
 end

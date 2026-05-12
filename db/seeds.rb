@@ -43,5 +43,9 @@ instances = [
 ]
 
 instances.each do |name, type|
-  Instance.create(name: name, instance_type: type, version: "", permanent: true)
+  Instance.find_or_create_by(name: name) do |instance|
+    instance.instance_type = type
+    instance.version = ""
+    instance.permanent = true
+  end
 end

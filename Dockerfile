@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM ruby:2.7.6-slim
+FROM ruby:3.3.6-slim
 
 WORKDIR /app
 
@@ -8,7 +8,8 @@ WORKDIR /app
 RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
     build-essential \
-    default-libmysqlclient-dev \
+    libsqlite3-dev \
+    libyaml-dev \
     git \
     && rm -rf /var/lib/apt/lists/*
 
@@ -19,9 +20,8 @@ RUN groupadd --system --gid 1001 rails && \
 # Gemfile をコピーして依存関係をインストール
 COPY Gemfile Gemfile.lock ./
 
-# bundler バージョンを合わせてインストール
-RUN gem install bundler -v 2.1.4 && \
-    bundle config set --local without 'development test' && \
+# bundler をインストール (Ruby 3.3 同梱のものを利用)
+RUN bundle config set --local without 'development test' && \
     bundle install --jobs 4 --retry 3
 
 # アプリケーションをコピー
@@ -37,7 +37,11 @@ RUN mkdir -p tmp/pids tmp/cache tmp/sockets log && \
 
 USER rails
 
+# storage ディレクトリの存在を保証 (volume マウント前のフォールバック)
+RUN mkdir -p storage
+
 EXPOSE 3000
 
-# Puma で起動
+# 起動時に db:prepare を実行してから Puma を起動
+ENTRYPOINT ["/app/bin/docker-entrypoint"]
 CMD ["bundle", "exec", "puma", "-C", "config/puma.rb"]

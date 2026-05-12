@@ -83,7 +83,7 @@ module Api
       end
 
       def stale_cache?(instance)
-        if instance[:parmanent] then
+        if instance[:permanent] then
           false
         elsif instance[:instance_type] == "unknown" then
           instance[:updated_at] < Time.current.ago(1.days)

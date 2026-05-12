@@ -1,0 +1,6 @@
+#!/bin/bash -e
+
+# SQLite データベースの作成・マイグレーション・seed を冪等に実行
+./bin/rails db:prepare
+
+exec "${@}"

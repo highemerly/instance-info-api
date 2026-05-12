@@ -30,9 +30,9 @@ Example of response:
 
 ### Pre-requirements
 
-- Ruby 2.7
-- Rails 7.0
-- MySQL 8.0
+- Ruby 3.3
+- Rails 8.0
+- SQLite 3 (used as a local cache store)
 
 ### Install
 
@@ -57,28 +57,13 @@ SECRET_KEY_BASE='<xxxxxxxxxxxxxxxx>'
 
 ### Prepare database
 
-If you use `instanceapi` database and `instanceapiuser` user in local databases,
+The cache database is a single SQLite file under `storage/`. Initialize it with:
 
 ```
-$ mysql -u root
-> CREATE DATABASE instanceapi;
-> CREATE USER 'instanceapiuser'@'localhost' IDENTIFIED BY '*********';
-> GRANT ALL ON instanceapi.* TO 'instanceapiuser'@'localhost';
+$ RAILS_ENV=production bundle exec rails db:prepare
 ```
 
-In addition, create `.env` files for your environments.
-
-```
-$ vi .env.production
-
-DB_HOST = 'localhost'
-DB_NAME = 'instanceapi'
-DB_USER = 'instanceapiuser'
-DB_PASS = '*********'
-
-$ RAILS_ENV=production bundle exec rails db:migrate
-$ RAILS_ENV=production bundle exec rails db:seed
-```
+`db:prepare` is idempotent — it creates the database, loads the schema and seeds on the first run, and applies pending migrations on subsequent runs.
 
 ### Run
 
@@ -87,6 +72,15 @@ $ RAILS_ENV=production bundle exec rails server
 ```
 
 Then, `curl http://localhost:3000/api/v1/instances/<instance-name>` may be respond desirable json.
+
+### Run with Docker
+
+```
+$ cp .env.sample .env.production   # set SECRET_KEY_BASE
+$ docker compose up --build
+```
+
+The SQLite cache is persisted in the `sqlite_data` named volume.
 
 ## License
 

@@ -10,6 +10,7 @@ RUN apt-get update -qq && \
     build-essential \
     libsqlite3-dev \
     libyaml-dev \
+    libcurl4 \
     git \
     && rm -rf /var/lib/apt/lists/*
 

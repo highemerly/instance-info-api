@@ -37,6 +37,10 @@ gem "bootsnap", require: false
 # gem "rack-cors"
 
 gem "graphql-client"
+# libcurl-backed HTTP client. We use it for fediverse.observer because their
+# Cloudflare blocks Ruby Net::HTTP's TLS fingerprint when traffic originates
+# from datacenter IP ranges; libcurl produces a fingerprint that passes.
+gem "typhoeus"
 gem "dotenv-rails"
 
 group :development, :test do

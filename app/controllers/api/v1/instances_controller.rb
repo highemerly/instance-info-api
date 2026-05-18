@@ -1,6 +1,6 @@
 require "resolv"
 require "graphql/client"
-require "graphql/client/http"
+require "typhoeus"
 
 NameServer = '8.8.8.8'
 
@@ -209,13 +209,47 @@ module SWAPI
   # Provide via the SWAPI_API_KEY environment variable; rotate yearly.
   API_KEY = ENV["SWAPI_API_KEY"].to_s
 
-  # Identify ourselves to fediverse.observer's WAF. The default Ruby/Net::HTTP
-  # User-Agent is treated as bot traffic by Cloudflare.
-  HTTP = GraphQL::Client::HTTP.new("https://api.fediverse.observer/graphql") do
-    def headers(context)
-      { "User-Agent" => "instance-info-api/1.0 (+https://github.com/highemerly/instance-info-api)" }
+  # Drop-in replacement for GraphQL::Client::HTTP that routes requests through
+  # libcurl (via Typhoeus). Required because Cloudflare bot management blocks
+  # Ruby Net::HTTP's TLS fingerprint when the source is a datacenter IP; curl
+  # passes from the same IP. Contract: respond to #execute(document:,
+  # operation_name:, variables:, context:) and return a parsed JSON hash —
+  # this is what GraphQL::Client and ::dump_schema rely on.
+  class CurlTransport
+    def initialize(url, headers: {})
+      @url = url
+      @headers = headers
+    end
+
+    def execute(document:, operation_name: nil, variables: {}, context: {})
+      body = { "query" => document.to_query_string }
+      body["variables"] = variables if variables.any?
+      body["operationName"] = operation_name if operation_name
+
+      response = Typhoeus.post(
+        @url,
+        body: JSON.generate(body),
+        headers: @headers.merge(
+          "Content-Type" => "application/json",
+          "Accept" => "application/json"
+        )
+      )
+
+      # Mirror GraphQL::Client::HTTP: parse the body on 200/400, otherwise
+      # synthesise an errors-only payload so the client surfaces it as a
+      # Response with nil data (which fetch_swapi_nodes raises on).
+      if response.code == 200 || response.code == 400
+        JSON.parse(response.body)
+      else
+        { "errors" => [{ "message" => "#{response.code} #{response.return_message}" }] }
+      end
     end
   end
+
+  HTTP = CurlTransport.new(
+    "https://api.fediverse.observer/graphql",
+    headers: { "User-Agent" => "instance-info-api/1.0 (+https://github.com/highemerly/instance-info-api)" }
+  )
   # Load the schema from a checked-in JSON dump rather than running an
   # introspection query against fediverse.observer at boot. The introspection
   # request was a hard boot-time dependency on a third-party API, so any

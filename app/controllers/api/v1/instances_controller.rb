@@ -194,7 +194,12 @@ end
 
 module SWAPI
   HTTP = GraphQL::Client::HTTP.new("https://api.fediverse.observer/graphql")
-  Schema = GraphQL::Client.load_schema(HTTP)
+  # Load the schema from a checked-in JSON dump rather than running an
+  # introspection query against fediverse.observer at boot. The introspection
+  # request was a hard boot-time dependency on a third-party API, so any
+  # degraded response (e.g. missing the "data" key) used to crash Puma start.
+  # Refresh the file with `bundle exec rake swapi:schema:dump`.
+  Schema = GraphQL::Client.load_schema(Rails.root.join("db", "swapi_schema.json").to_s)
   Client = GraphQL::Client.new(schema: Schema, execute: HTTP)
   Query = Client.parse <<-'GRAPHQL'
   query($domain: String!) {

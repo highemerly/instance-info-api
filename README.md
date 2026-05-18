@@ -108,6 +108,16 @@ $ RAILS_ENV=production bundle exec rails db:prepare
 
 `db:prepare` is idempotent — it creates the database, loads the schema and seeds on the first run, and applies pending migrations on subsequent runs.
 
+### Refresh the fediverse.observer GraphQL schema
+
+The GraphQL client loads its schema from `db/swapi_schema.json` (checked into the repo) instead of running introspection against fediverse.observer at boot, so a flaky upstream response can no longer prevent Puma from starting. Refresh the file when the upstream schema changes:
+
+```
+$ bundle exec rake swapi:schema:dump
+```
+
+Commit the regenerated `db/swapi_schema.json` along with any client changes that depend on it.
+
 ### Run
 
 ```

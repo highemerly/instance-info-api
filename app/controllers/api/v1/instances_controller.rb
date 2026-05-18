@@ -32,7 +32,7 @@ module Api
             source = cached_source(instance)
           else
             begin
-              graphQL_result = SWAPI::Client.query(SWAPI::Query, variables: {domain: instance_name})
+              nodes = fetch_swapi_nodes(instance_name)
             rescue
               # fediverse.observer unavailable — serve stale cache as a fallback
               # rather than failing, since we still have something useful to return.
@@ -44,7 +44,7 @@ module Api
               instance_updated_at = instance[:updated_at]
               source = stale_fallback_source(instance)
             else
-              if graphQL_result.data.node.length == 0 then
+              if nodes.length == 0 then
                 instance_type = instance[:instance_type]
                 instance_software = instance[:software]
                 instance_version = instance[:version]
@@ -53,7 +53,7 @@ module Api
                 instance_updated_at = instance[:updated_at]
                 source = "cache:cache-stale"
               else
-                graphQL_result.data.node.each do |node|
+                nodes.each do |node|
                   instance_software = node.softwarename
                   instance_type = SoftwareFamilies.normalize(node.softwarename)
                   instance_version = node.fullversion
@@ -86,14 +86,14 @@ module Api
 
         if instance_type == "" && instance_ipaddr != "" then
           begin
-            result = SWAPI::Client.query(SWAPI::Query, variables: {domain: instance_name})
+            nodes = fetch_swapi_nodes(instance_name)
           rescue
             instance_type = "unknown"
             source = "error:observer-unavailable"
             # observer-unavailable is transient and NOT cached
           else
-            unless result.data.node.length == 0 then
-              result.data.node.each do |node|
+            unless nodes.length == 0 then
+              nodes.each do |node|
                 instance_software = node.softwarename
                 instance_type = SoftwareFamilies.normalize(node.softwarename)
                 instance_version = node.fullversion
@@ -124,6 +124,17 @@ module Api
       end
 
       private
+
+      # graphql-client surfaces non-2xx/400 upstream responses (e.g. 403 IP
+      # blocks, 5xx) as a Response with errors but nil data, which would
+      # NoMethodError on `.node` downstream. Raise so the caller's rescue path
+      # handles it as observer-unavailable / stale-fallback instead of 500ing.
+      def fetch_swapi_nodes(domain)
+        variables = { domain: domain, key: SWAPI::API_KEY }
+        result = SWAPI::Client.query(SWAPI::Query, variables: variables)
+        raise "fediverse.observer returned no data" if result.data.nil?
+        result.data.node
+      end
 
       def response_json(name, type, software, version, total_users, status, updated_at, source)
         json = { name: name, type: type }
@@ -193,7 +204,18 @@ module Api
 end
 
 module SWAPI
-  HTTP = GraphQL::Client::HTTP.new("https://api.fediverse.observer/graphql")
+  # API key issued by fediverse.observer. Requests without a valid key are
+  # blocked by Cloudflare (HTTP 403) for traffic from datacenter IP ranges.
+  # Provide via the SWAPI_API_KEY environment variable; rotate yearly.
+  API_KEY = ENV["SWAPI_API_KEY"].to_s
+
+  # Identify ourselves to fediverse.observer's WAF. The default Ruby/Net::HTTP
+  # User-Agent is treated as bot traffic by Cloudflare.
+  HTTP = GraphQL::Client::HTTP.new("https://api.fediverse.observer/graphql") do
+    def headers(context)
+      { "User-Agent" => "instance-info-api/1.0 (+https://github.com/highemerly/instance-info-api)" }
+    end
+  end
   # Load the schema from a checked-in JSON dump rather than running an
   # introspection query against fediverse.observer at boot. The introspection
   # request was a hard boot-time dependency on a third-party API, so any
@@ -202,8 +224,8 @@ module SWAPI
   Schema = GraphQL::Client.load_schema(Rails.root.join("db", "swapi_schema.json").to_s)
   Client = GraphQL::Client.new(schema: Schema, execute: HTTP)
   Query = Client.parse <<-'GRAPHQL'
-  query($domain: String!) {
-    node(domain: $domain) {
+  query($domain: String!, $key: String) {
+    node(domain: $domain, key: $key) {
       softwarename
       fullversion
       total_users

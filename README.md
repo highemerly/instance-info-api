@@ -98,6 +98,16 @@ $ vi .env.production
 SECRET_KEY_BASE='<xxxxxxxxxxxxxxxx>'
 ```
 
+### Obtain a fediverse.observer API key
+
+Requests from datacenter IP ranges are blocked by Cloudflare with HTTP 403 unless they carry a valid API key. Generate one at <https://api.fediverse.observer/keygenerator.php> (keys are tied to an email, last about one year, and replace any previous key issued to the same email). Put it in `.env.production` (or your Kubernetes secret):
+
+```
+SWAPI_API_KEY='<the-key-you-received>'
+```
+
+Without this key the controller will still boot and serve cached responses, but live lookups against fediverse.observer return `503 error:observer-unavailable`.
+
 ### Prepare database
 
 The cache database is a single SQLite file under `storage/`. Initialize it with:

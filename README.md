@@ -48,6 +48,24 @@ cache database — i.e. when the data was last fetched from fediverse.observer
 (or, for builtin entries, when seeds were loaded). It is omitted only when
 there is no cache row (e.g. a DNS error path that never persists).
 
+### Selecting a data source
+
+By default, live lookups try `fediverse.observer` first and fall back to
+direct nodeinfo only when observer returns a 50x or 403 response. Pin a single
+source with `?source=`:
+
+```
+GET /api/v1/instances/<name>?source=fediverse.observer
+GET /api/v1/instances/<name>?source=nodeinfo
+```
+
+Invalid values return HTTP 400 with a JSON body listing the valid options.
+
+When data is sourced from `nodeinfo`, the `status` field is `null` — nodeinfo
+itself doesn't expose a monitoring history equivalent to fediverse.observer's
+integer status, so the field is emitted as `null` instead of being omitted, to
+make the semantic gap explicit.
+
 ### `source` values and HTTP status codes
 
 `source` describes where the response data came from. Cached responses prefix
@@ -58,16 +76,36 @@ from a cached one.
 | --------------------------------------------- | ----------- | ------------------------------------------------------------------------ |
 | `builtin`                                     | 200         | Hard-coded non-fediverse entry (e.g. twitter.com).                       |
 | `fediverse.observer`                          | 200         | Fresh fetch from fediverse.observer.                                     |
-| `fediverse.observer:cache-revalidated`        | 200         | Stale cache refreshed; software unchanged.                               |
-| `fediverse.observer:cache-refleshed`          | 200         | Stale cache refreshed; software changed.                                 |
-| `cache:fediverse.observer`                    | 200         | Cached fediverse.observer result, within TTL.                            |
-| `cache:fediverse.observer:stale-fallback`     | 200         | Stale cache served because the refresh attempt could not reach observer. |
-| `cache:cache-stale`                           | 200 / 404   | Stale cache kept after observer returned no data (404 when type=unknown).|
-| `error:no-data`                               | 404         | Fresh fetch — observer has no record for this domain.                    |
+| `fediverse.observer:cache-revalidated`        | 200         | Stale cache refreshed via observer; software unchanged.                  |
+| `fediverse.observer:cache-refleshed`          | 200         | Stale cache refreshed via observer; software changed.                    |
+| `cache:fediverse.observer`                    | 200         | Cached observer result, within TTL.                                      |
+| `cache:fediverse.observer:stale-fallback`     | 200         | Stale cache served because every refresh attempt was unavailable.        |
+| `nodeinfo`                                    | 200         | Fresh fetch via direct nodeinfo (fallback path or `?source=nodeinfo`).   |
+| `nodeinfo:cache-revalidated`                  | 200         | Stale cache refreshed via nodeinfo; software unchanged.                  |
+| `nodeinfo:cache-refleshed`                    | 200         | Stale cache refreshed via nodeinfo; software changed.                    |
+| `cache:nodeinfo`                              | 200         | Cached nodeinfo result, within TTL.                                      |
+| `cache:nodeinfo:stale-fallback`               | 200         | Stale cache served because every refresh attempt was unavailable.        |
+| `cache:cache-stale`                           | 200 / 404   | Stale cache kept after the upstream returned no data (404 when type=unknown). |
+| `error:no-data`                               | 404         | Fresh fetch — no upstream had a record for this domain.                  |
 | `cache:error:no-data`                         | 404         | Cached "no data" result, within TTL.                                     |
-| `cache:error:no-data:stale-fallback`          | 404         | Cached "no data" served because observer could not be reached.           |
+| `cache:error:no-data:stale-fallback`          | 404         | Cached "no data" served because every upstream was unavailable.          |
 | `error:dns-error`                             | 400         | Domain failed DNS resolution. Not cached.                                |
-| `error:observer-unavailable`                  | 503         | Could not reach fediverse.observer (timeout, network, malformed reply). Not cached. |
+| `error:observer-unavailable`                  | 503         | `?source=fediverse.observer` was pinned and the call failed. Not cached. |
+| `error:nodeinfo-unavailable`                  | 503         | Every backend tried (default chain or `?source=nodeinfo`) was unavailable. Not cached. |
+
+### Source health endpoint
+
+```
+GET /api/v1/health/sources
+```
+
+Returns this Pod's in-memory counters per remote source (observer, nodeinfo):
+consecutive failures since the last success, lifetime totals, and the last
+failure/success events. Each failure is also written to the Rails log as a
+`source_failure name=... status=... domain=... message=...` line for log
+aggregators.
+
+State is per-Pod and resets on restart. Aggregate across replicas externally.
 
 ## Run your own environments
 

@@ -93,19 +93,31 @@ from a cached one.
 | `error:observer-unavailable`                  | 503         | `?source=fediverse.observer` was pinned and the call failed. Not cached. |
 | `error:nodeinfo-unavailable`                  | 503         | Every backend tried (default chain or `?source=nodeinfo`) was unavailable. Not cached. |
 
-### Source health endpoint
+### Health endpoints
 
-```
-GET /api/v1/health/sources
-```
+| Endpoint                  | Use it for                  | Behaviour                                                                                                         |
+| ------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/health/live` | k8s **liveness** probe      | Returns 200 as long as Puma serves requests. Doesn't touch the DB or upstreams, so external outages can't restart the Pod. |
+| `GET /api/v1/health/ready`| k8s **readiness** probe     | Returns 200 when the cache DB is reachable, 503 otherwise. Excludes upstream health on purpose — observer/nodeinfo failures are absorbed by the backend chain, not by removing the Pod from the Service. |
+| `GET /api/v1/health/sources` | observability dashboards | Returns this Pod's in-memory tally of per-source success/failure events. Always 200 even when every upstream is down — not suitable as a probe. |
 
-Returns this Pod's in-memory counters per remote source (observer, nodeinfo):
-consecutive failures since the last success, lifetime totals, and the last
-failure/success events. Each failure is also written to the Rails log as a
+`/health/sources` records each failure to the Rails log as a structured
 `source_failure name=... status=... domain=... message=...` line for log
-aggregators.
+aggregators. State is per-Pod and resets on restart; aggregate across replicas
+externally.
 
-State is per-Pod and resets on restart. Aggregate across replicas externally.
+Example Deployment probe configuration:
+
+```yaml
+livenessProbe:
+  httpGet: { path: /api/v1/health/live, port: 3000 }
+  initialDelaySeconds: 10
+  periodSeconds: 10
+readinessProbe:
+  httpGet: { path: /api/v1/health/ready, port: 3000 }
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
 
 ## Run your own environments
 

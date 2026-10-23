@@ -23,5 +23,9 @@ module InstanceInfoApi
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
+
+    # We never store images, so turn off variant processing instead of pulling
+    # in image_processing (Rails 8.1 warns at boot without one or the other).
+    config.active_storage.variant_processor = :disabled
   end
 end

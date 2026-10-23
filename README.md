@@ -123,8 +123,8 @@ readinessProbe:
 
 ### Pre-requirements
 
-- Ruby 3.3
-- Rails 8.0
+- Ruby 4.0
+- Rails 8.1
 - SQLite 3 (used as a local cache store)
 
 ### Install

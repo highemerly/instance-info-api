@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM ruby:3.3.6-slim
+FROM ruby:4.0.8-slim
 
 WORKDIR /app
 
@@ -16,12 +16,12 @@ RUN apt-get update -qq && \
 
 # 非 root ユーザーを作成
 RUN groupadd --system --gid 1001 rails && \
-    useradd --system --uid 1001 --gid rails rails
+    useradd --system --uid 1001 --gid rails --create-home rails
 
 # Gemfile をコピーして依存関係をインストール
 COPY Gemfile Gemfile.lock ./
 
-# bundler をインストール (Ruby 3.3 同梱のものを利用)
+# bundler をインストール (Ruby 4.0 同梱のものを利用)
 RUN bundle config set --local without 'development test' && \
     bundle install --jobs 4 --retry 3
 

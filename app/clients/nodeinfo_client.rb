@@ -1,8 +1,8 @@
 require "typhoeus"
 require "json"
 
-# Direct nodeinfo fetcher used as a fallback when fediverse.observer returns
-# 50x/403. Two requests: /.well-known/nodeinfo for discovery, then the
+# Direct nodeinfo fetcher, the only backend in the chain since fediverse.observer
+# shut down. Two requests: /.well-known/nodeinfo for discovery, then the
 # document itself. We use libcurl (Typhoeus) for consistency with the observer
 # client, though most fediverse instances don't have the Cloudflare bot filter
 # that forces our hand for observer.

@@ -4,6 +4,9 @@ require "json"
 # fediverse.observer GraphQL client and the SourceResult-shaped backend the
 # controller iterates over.
 #
+# Not wired into InstancesController: the service shut down in 2026-10. Kept
+# so it can be added back to the chain if observer returns.
+#
 # The HTTP transport is libcurl-backed (via Typhoeus): Cloudflare blocks Ruby
 # Net::HTTP's TLS fingerprint when traffic originates from a datacenter IP,
 # but lets libcurl through. We also keep the GraphQL::Client-compatible

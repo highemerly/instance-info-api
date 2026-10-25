@@ -5,7 +5,10 @@ NameServer = '8.8.8.8'
 module Api
   module V1
     class InstancesController < ApplicationController
-      VALID_SOURCE_PARAMS = %w[fediverse.observer nodeinfo].freeze
+      # fediverse.observer shut down (2026-10), so it's out of the chain and
+      # `?source=fediverse.observer` is rejected. FediverseObserverClient is
+      # kept in case the service comes back.
+      VALID_SOURCE_PARAMS = %w[nodeinfo].freeze
 
       def show
         response.set_header('Access-Control-Allow-Origin', '*') # (tmp) For debug only
@@ -30,16 +33,11 @@ module Api
 
       private
 
-      # nil  -> default chain (observer first, nodeinfo fallback on 50x/403)
-      # "fediverse.observer" / "nodeinfo" -> single-backend pin
-      # anything else -> caller renders 400
+      # nil / "nodeinfo" -> nodeinfo only
+      # anything else (incl. "fediverse.observer") -> caller renders 400
       def backends_for_param(value)
         case value
-        when nil, ""
-          [FediverseObserverClient::Backend.new, NodeinfoClient::Backend.new]
-        when "fediverse.observer"
-          [FediverseObserverClient::Backend.new]
-        when "nodeinfo"
+        when nil, "", "nodeinfo"
           [NodeinfoClient::Backend.new]
         end
       end

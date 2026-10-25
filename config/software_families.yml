@@ -1,12 +1,12 @@
 # Mapping of canonical fediverse software family names to their variants /
-# forks as returned by fediverse.observer's `softwarename` field.
+# forks as returned in nodeinfo's `software.name` field.
 #
 # When the API receives a softwarename listed here, it is normalized to the
 # canonical key. The raw softwarename is preserved in the `software`
 # response field. Unmapped softwarenames are returned as-is for both `type`
 # and `software`.
 #
-# Add new forks here when fediverse.observer starts reporting them.
+# Add new forks here when instances start reporting them.
 # Run `rake fediverse:check_unknown_software` (if defined) to surface any
 # softwarename not covered by this map.
 

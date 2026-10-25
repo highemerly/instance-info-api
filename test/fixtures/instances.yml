@@ -1,11 +1,20 @@
 # Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
 
-one:
-  name: MyString
-  instance_type: MyString
-  version: MyString
+twitter:
+  name: twitter.com
+  instance_type: twitter
+  permanent: true
+  source: builtin
 
-two:
-  name: MyString
-  instance_type: MyString
-  version: MyString
+# Past the 3-day TTL, so a request refreshes it upstream. Lets controller
+# tests exercise the backend chain without the DNS pre-check that fresh
+# lookups do.
+stale_mastodon:
+  name: stale.example
+  instance_type: mastodon
+  software: mastodon
+  version: 4.0.0
+  total_users: 10
+  status: 1
+  source: fediverse.observer
+  updated_at: <%= 10.days.ago.to_fs(:db) %>

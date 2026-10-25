@@ -215,9 +215,9 @@ $ git push origin v1.0.0
 `.github/workflows/docker-build.yml` then:
 
 1. Runs the same checks in parallel with the image build.
-2. Builds `ghcr.io/highemerly/anypost-api` for `linux/amd64` with `--pull --no-cache`, so OS security updates are always picked up, and smoke-tests the image.
+2. Builds `ghcr.io/highemerly/instance-info-api` for `linux/amd64` with `--pull --no-cache`, so OS security updates are always picked up, and smoke-tests the image.
 3. Pushes it as `1.0.0`, `1.0` and `latest`.
-4. Opens a PR against `highemerly/k8sg1-repo` that bumps `manifests/anypost/prd/api.yaml`. Flux deploys it once the PR is merged.
+4. Opens a PR against `highemerly/k8sg1-repo` that bumps `manifests/anypost/prd/api.yaml`. Flux deploys it once the PR is merged. (The k8s resources keep their `anypost-api` names; images were published as `ghcr.io/highemerly/anypost-api` until 1.0.0.)
 
 To rebuild without a new tag (e.g. to pick up base image security fixes), run the workflow manually from the Actions tab with a tag name such as `v1.0.1`. Opening the k8sg1-repo PR needs the `K8SG1_PAT` repository secret.
 

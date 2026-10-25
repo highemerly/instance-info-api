@@ -1,0 +1,39 @@
+name: Checks
+
+# minitest / bundler-audit を回す再利用可能ワークフロー。
+# ci.yml（全ブランチ push）と docker-build.yml（タグ push でビルドと並走）の両方から呼ぶ。
+# CI ステップの単一の定義元。
+on:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Ruby のバージョンは .ruby-version を単一の定義元にする（Gemfile / Dockerfile と揃える）。
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+
+      # テストは Typhoeus の接続をブロックしてスタブで回すので、外部ネットワークには出ない。
+      - name: Test (minitest)
+        env:
+          RAILS_ENV: test
+        run: |
+          bin/rails db:prepare
+          bin/rails test
+
+      # 既知の脆弱性がある gem が lock に残っていたらリリースを止める。
+      # advisory DB は毎回最新を取るので、コード変更がなくても新規公開分で落ちることがある。
+      - name: Audit gems (bundler-audit)
+        if: ${{ !cancelled() }}
+        run: |
+          gem install bundler-audit --no-document
+          bundle-audit check --update

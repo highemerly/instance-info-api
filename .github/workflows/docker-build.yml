@@ -1,0 +1,180 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (e.g., v1.0.0)'
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  # GHCR のパッケージ名はリポジトリ名（instance-info-api）ではなく anypost-api。
+  # パッケージはこのリポジトリに紐付いているので GITHUB_TOKEN で push できる。
+  IMAGE_NAME: highemerly/anypost-api
+  K8S_REPO: highemerly/k8sg1-repo
+  K8S_MANIFEST_PATH: manifests/anypost/prd/api.yaml
+
+jobs:
+  # CI（minitest / bundler-audit）。build-and-push と並走し、両方緑になって初めて
+  # create-k8s-pr が走る（下の needs 参照）。定義は checks.yml に集約。
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # タグ push / 手動実行のどちらでも先頭の v を落として 1.2.3 形式に揃える
+      # （イメージタグとマニフェストの値が食い違わないように）。
+      - name: Extract version
+        id: version
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            raw="$INPUT_TAG"
+          else
+            raw="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "version=${raw#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      # apt-get の RUN レイヤがキャッシュされると OS パッケージのセキュリティ修正が入らない
+      # （CVE-2026-111497 の libbrotli1 がこれで古いまま残った）。リリースは毎回
+      # ベースイメージを pull し、キャッシュなしで組み直す。amd64 ネイティブなので数分で済む。
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          pull: true
+          no-cache: true
+          load: true
+          tags: anypost-api:ci
+          platforms: linux/amd64
+
+      # 本番と同じイメージで Puma が起動し、DB 準備（db:prepare + seed）が通ることを確かめる。
+      # 外部に出ないエンドポイントだけを叩く。
+      - name: Smoke test image
+        run: |
+          docker run -d --name smoke -p 3000:3000 -e SECRET_KEY_BASE="$(openssl rand -hex 64)" anypost-api:ci
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:3000/api/v1/health/live >/dev/null && break
+            sleep 2
+          done
+          curl -sf http://localhost:3000/api/v1/health/live
+          curl -sf http://localhost:3000/api/v1/health/ready
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/instances/twitter.com)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:3000/api/v1/instances/twitter.com?source=fediverse.observer')" = 400
+
+      - name: Show container logs
+        if: always()
+        run: docker logs smoke || true
+
+      # 直前のビルドと同じ builder なのでレイヤはキャッシュから再利用され、検証したものと同じ中身が push される。
+      - name: Push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+
+  create-k8s-pr:
+    # ビルド（スモークテスト込み）と CI が両方成功したときだけ k8s マニフェストへ PR する。
+    # k8sg1-repo は Flux 同期なので、この PR のマージがそのままデプロイになる。
+    needs: [build-and-push, checks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: src
+
+      # 前回のタグからのコミット一覧を PR 本文に載せ、何がデプロイされるかをレビューできるようにする。
+      - name: Collect changes since previous release
+        id: changes
+        run: |
+          cd src
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          {
+            echo "prev_tag=${PREV_TAG:-（初回リリース）}"
+            echo "log<<EOF"
+            git log --no-merges --pretty='- %s (%h)' ${PREV_TAG:+"$PREV_TAG"..}HEAD | head -n 30
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout k8s repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.K8S_REPO }}
+          token: ${{ secrets.K8SG1_PAT }}
+          path: k8s-repo
+
+      # マニフェストの置き場所やイメージ名が変わって sed が空振りしたら、空の PR を作らずに落とす。
+      - name: Update image tag
+        run: |
+          cd k8s-repo
+          NEW_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.version }}"
+          sed -i "s|image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:.*|image: ${NEW_IMAGE}|" "${{ env.K8S_MANIFEST_PATH }}"
+          grep -q "image: ${NEW_IMAGE}$" "${{ env.K8S_MANIFEST_PATH }}"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          path: k8s-repo
+          token: ${{ secrets.K8SG1_PAT }}
+          branch: update-anypost-api-${{ needs.build-and-push.outputs.version }}
+          delete-branch: true
+          commit-message: "Update anypost-api to ${{ needs.build-and-push.outputs.version }}"
+          title: "Update anypost-api to ${{ needs.build-and-push.outputs.version }}"
+          body: |
+            ## Changes
+            - Update image: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.version }}`
+            - Source: ${{ github.repository }}@${{ github.sha }}
+
+            ### Commits since ${{ steps.changes.outputs.prev_tag }}
+            ${{ steps.changes.outputs.log }}
+
+            ## Migration
+            ✅ 手動マイグレーション不要（SQLite は emptyDir のキャッシュで、起動時の `db:prepare` が適用する）
+
+            ---
+            🤖 Auto-generated by [GitHub Actions](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          labels: |
+            anypost

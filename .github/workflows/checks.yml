@@ -22,10 +22,12 @@ jobs:
           ruby-version: .ruby-version
           bundler-cache: true
 
-      # テストは Typhoeus の接続をブロックしてスタブで回すので、外部ネットワークには出ない。
+      # 基本は Typhoeus の接続をブロックしてスタブで回す。LIVE_NODEINFO_HOST を渡したときだけ
+      # live_nodeinfo_test.rb が実サーバー（自前の Mastodon、handon.club）に nodeinfo を取りに行く。
       - name: Test (minitest)
         env:
           RAILS_ENV: test
+          LIVE_NODEINFO_HOST: handon.club
         run: |
           bin/rails db:prepare
           bin/rails test

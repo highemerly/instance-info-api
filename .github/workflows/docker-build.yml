@@ -84,7 +84,8 @@ jobs:
           platforms: linux/amd64
 
       # 本番と同じイメージで Puma が起動し、DB 準備（db:prepare + seed）が通ることを確かめる。
-      # 外部に出ないエンドポイントだけを叩く。
+      # 最後に自前の Mastodon（handon.club）を実際に引き、本番と同じ libcurl / DNS 経路で
+      # nodeinfo が取れることも見る。
       - name: Smoke test image
         run: |
           docker run -d --name smoke -p 3000:3000 -e SECRET_KEY_BASE="$(openssl rand -hex 64)" anypost-api:ci
@@ -96,6 +97,8 @@ jobs:
           curl -sf http://localhost:3000/api/v1/health/ready
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/instances/twitter.com)" = 200
           test "$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:3000/api/v1/instances/twitter.com?source=fediverse.observer')" = 400
+          curl -sf http://localhost:3000/api/v1/instances/handon.club | tee /dev/stderr \
+            | jq -e '.type == "mastodon" and .source == "nodeinfo" and (.total_users | type) == "number"'
 
       - name: Show container logs
         if: always()

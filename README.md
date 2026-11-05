@@ -198,6 +198,8 @@ The SQLite cache is persisted in the `sqlite_data` named volume.
 
 ## CI / Release
 
+Changes go through pull requests; direct pushes to `main` are rejected. See [docs/development.md](docs/development.md) for the setup and the reasons behind it.
+
 Every push to any branch runs the test suite and `bundle-audit` (`.github/workflows/ci.yml`).
 CI sets `LIVE_NODEINFO_HOST=handon.club`, so `test/integration/live_nodeinfo_test.rb` also does a real nodeinfo lookup against that Mastodon server. Locally the test is skipped unless you set the variable:
 

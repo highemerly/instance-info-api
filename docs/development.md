@@ -52,6 +52,44 @@ gh api -X PUT repos/highemerly/instance-info-api/rulesets/<id> --input .github/r
 | マージ後のブランチ | 自動で削除 | |
 | auto-merge | 有効 | CI が緑になったらマージ、を予約できるようにする |
 
+## 依存更新（Renovate）
+
+設定は [.github/renovate.json5](../.github/renovate.json5)（各ルールの理由はコメント）。Mend の Renovate App（モードは「Automated PRs」）で動く。
+
+- 週2回（月・木の朝）にまとめて PR が来る。ラベル `dependencies`（Release のノートで Dependencies に分かれる）
+- **メジャーは自動で PR にならない。** Issue「Dependency Dashboard」でチェックを入れたものだけ PR になる。
+  **Ruby（4.0 → 4.1）と Rails（8.1 → 8.2）はマイナーも同じく承認制**（実際には互換性を崩す更新のため）
+- gem は公開から3日待つ。Docker のベースイメージ（`ruby:X-slim`）は digest で固定し、digest の更新も PR になる
+- Ruby の版（`.ruby-version`・Gemfile の `ruby`・Dockerfile）は1つの PR にまとまる
+- 間接依存（Gemfile.lock だけにある gem）は週1の「Lock file maintenance」の PR でまとめて上がる
+- auto-merge はしない。CI（`ci-result`）が緑なのを見てから squash マージする
+- 脆弱性の修正は3日待ちや週2回の予定を待たずに要ることがある。bundler-audit が赤くなったら
+  「CI」の節のとおり手で上げる
+
+### PR が来たら
+
+1. **Gemfile.lock の差分を見て、実際に入る版が変わるかを確かめる。** Ruby の PR は Gemfile.lock の
+   `RUBY VERSION` も変わっているかを見る（変わっていなければ手元で `bundle lock` して足す）
+2. 下の表で、CI が緑でも確かめられていないものに当たるなら、そこだけ手元で見る
+3. マージ後、手元は `git switch main && git pull && bundle install`
+
+| 依存 | CI で確かめられること | CI では確かめられないこと |
+|---|---|---|
+| rails（と action*・active* 一式）・bootsnap | minitest（コントローラー・モデル）。本番イメージで Puma が起動し、`db:prepare` と seed が通り、API が答える（smoke） | テストの無い経路（ヘルスの `/sources` など）。マイナーは承認制 |
+| typhoeus・ethon（libcurl） | **minitest ではスタブ**だが、`live_nodeinfo_test.rb`（ランナーの libcurl）と smoke（イメージの libcurl）が handon.club から本物の nodeinfo を取る | handon.club 以外のサーバー（Misskey など）への取得。handon.club が落ちていると CI が赤くなる |
+| sqlite3 | minitest と、イメージでの `db:prepare` | 本番の DB は Pod ごとのキャッシュ（emptyDir）で、起動のたびに作り直されるので、前の版へ戻しても困らない |
+| puma | イメージで起動して答える（smoke） | 本番の負荷・スレッド数での挙動 |
+| graphql・graphql-client | 本番の起動時に読み込めること（smoke） | fediverse.observer の取得（2026-10 から止めている）と `rake swapi:schema:dump`。graphql-client は 0.x なので、0.26 → 0.27 のような上げ方でも互換性を崩しうる（Renovate はメジャー扱いしない） |
+| dotenv-rails・debug・tzinfo-data | 起動とテスト | — |
+| Lock file maintenance（nokogiri・rack など間接依存） | minitest・smoke・bundler-audit | — |
+| Ruby の版・Docker の ruby の digest | minitest（setup-ruby が `.ruby-version` を読む）・イメージのビルドと smoke | — （マイナーは承認制） |
+| GitHub Actions | checks.yml・smoke.yml で使うもの | **docker-build.yml・tag-release.yml だけで使うもの**（docker/login-action・docker/metadata-action・peter-evans/create-pull-request。リリース時にしか動かない）。マージ後の最初のリリースでログを見る |
+
+### 承認待ちの片付け
+
+Dependency Dashboard の「Pending Approval」にメジャー（と Ruby・Rails のマイナー）が溜まる。着手するときにチェックを入れる。
+見送るものは、理由を renovate.json5 にコメントで残す（承認待ちに残しておく理由が後から分かるように）。
+
 ## CI
 
 [ci.yml](../.github/workflows/ci.yml) が main 以外のブランチへの push で、**差分が影響しうるジョブだけ**を回す。

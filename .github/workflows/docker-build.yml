@@ -4,180 +4,218 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
+  # tag-release.yml（Actions の画面から手で実行）がタグを打ってから呼ぶ。GITHUB_TOKEN で push したタグでは
+  # ワークフローが起動しないため、push を待たずに直接呼んでもらう。そのタグは github.sha に付いているので、
+  # checkout（既定で github.sha）・checks・smoke もそのタグと同じコミットを見る。
+  # 失敗した実行の作り直しは、Actions の画面の Re-run で行う（以前の workflow_dispatch はやめた）。
+  workflow_call:
     inputs:
-      tag:
-        description: 'Image tag (e.g., v1.0.0)'
+      version:
+        description: 'Version without "v" (e.g., 1.2.3). The tag vX.Y.Z must already point at github.sha'
+        type: string
         required: true
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # 2026-10 までのイメージ名。マニフェストがまだこの名前を指していても置き換えられるようにする。
-  LEGACY_IMAGE_NAME: highemerly/anypost-api
-  K8S_REPO: highemerly/k8sg1-repo
-  K8S_MANIFEST_PATH: manifests/anypost/prd/api.yaml
 
 jobs:
-  # CI（minitest / bundler-audit）。build-and-push と並走し、両方緑になって初めて
-  # create-k8s-pr が走る（下の needs 参照）。定義は checks.yml に集約。
+  # ブランチでは差分で間引いた検査を、リリースでは全部回す。定義はブランチの CI と同じ
+  # 再利用ワークフロー（二重に書かない）。checks は build と並走する。
   checks:
     uses: ./.github/workflows/checks.yml
 
-  build-and-push:
+  # スモーク。push したばかりの本番イメージそのもの（＝デプロイするもの）で回す。
+  # 作り直したイメージで通っても、本番に出すものの確認にならない
+  smoke:
+    needs: build
+    uses: ./.github/workflows/smoke.yml
+    with:
+      image: ${{ needs.build.outputs.image }}
+
+  build:
     runs-on: ubuntu-latest
+    # ふだんは 2 分ほど（キャッシュなしで組み直す）。固まったときに既定の 6 時間待たない
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
     outputs:
       version: ${{ steps.version.outputs.version }}
+      # smoke が pull するイメージ（metadata-action の {{version}} と同じ値）
+      image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+      # release のノートの起点。前回のタグが無ければ空
+      # （DB は起動時の db:prepare が当てるキャッシュなので、手で当てるマイグレーションは無い。has_migration は出さない）
+      prev_tag: ${{ steps.prev.outputs.prev_tag }}
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          # 前回のタグを取るため履歴ごと取る
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # タグ push / 手動実行のどちらでも先頭の v を落として 1.2.3 形式に揃える
-      # （イメージタグとマニフェストの値が食い違わないように）。
+      # マニフェストに書く値（v なしのセメンティックバージョン）。例: refs/tags/v1.2.3 -> 1.2.3。
+      # 入力は `${{ }}` で run: に直接埋めない（値に `"` や `$(...)` があればそのまま実行される）。環境変数で渡す
       - name: Extract version
         id: version
         env:
-          INPUT_TAG: ${{ github.event.inputs.tag }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: echo "version=${INPUT_VERSION:-${GITHUB_REF#refs/tags/v}}" >> "$GITHUB_OUTPUT"
+
+      - name: Find previous tag
+        id: prev
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            raw="$INPUT_TAG"
-          else
-            raw="${GITHUB_REF#refs/tags/}"
-          fi
-          echo "version=${raw#v}" >> "$GITHUB_OUTPUT"
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+          echo "Previous tag: ${PREV_TAG:-(none)}"
 
       - name: Extract metadata (tags, labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # tag-release.yml から呼ばれたときは github.ref が main なので、版は value で渡す
+          flavor: latest=false
           tags: |
-            type=raw,value=${{ steps.version.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ steps.version.outputs.version }}
+            type=raw,value=latest
 
       # apt-get の RUN レイヤがキャッシュされると OS パッケージのセキュリティ修正が入らない
-      # （CVE-2026-111497 の libbrotli1 がこれで古いまま残った）。リリースは毎回
-      # ベースイメージを pull し、キャッシュなしで組み直す。amd64 ネイティブなので数分で済む。
-      - name: Build Docker image
-        uses: docker/build-push-action@v6
+      # （CVE-2026-111497 の libbrotli1 がこれで古いまま残った）。リリースは毎回ベースイメージを pull し、
+      # キャッシュを読まずに組み直す（no-cache は読み出しだけを止める。cache-to は書く）。
+      # ブランチのスモーク（smoke.yml）はここで積む buildcache を読む。GitHub Actions のキャッシュ（type=gha）は
+      # タグの実行で積んだものをブランチから読めないので、レジストリに置く。
+      # イメージ自体は検査の結果を待たずに push され、latest も動く。本番は版を固定していて
+      # latest をデプロイに使わない（docs/development.md「リリース」）。
+      - name: Build and push
+        uses: docker/build-push-action@v7
         with:
           context: .
+          platforms: linux/amd64
           pull: true
           no-cache: true
-          load: true
-          tags: instance-info-api:ci
-          platforms: linux/amd64
-
-      # 本番と同じイメージで Puma が起動し、DB 準備（db:prepare + seed）が通ることを確かめる。
-      # 最後に自前の Mastodon（handon.club）を実際に引き、本番と同じ libcurl / DNS 経路で
-      # nodeinfo が取れることも見る。
-      - name: Smoke test image
-        run: |
-          docker run -d --name smoke -p 3000:3000 -e SECRET_KEY_BASE="$(openssl rand -hex 64)" instance-info-api:ci
-          for _ in $(seq 1 30); do
-            curl -sf http://localhost:3000/api/v1/health/live >/dev/null && break
-            sleep 2
-          done
-          curl -sf http://localhost:3000/api/v1/health/live
-          curl -sf http://localhost:3000/api/v1/health/ready
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/api/v1/instances/twitter.com)" = 200
-          test "$(curl -s -o /dev/null -w '%{http_code}' 'http://localhost:3000/api/v1/instances/twitter.com?source=fediverse.observer')" = 400
-          curl -sf http://localhost:3000/api/v1/instances/handon.club | tee /dev/stderr \
-            | jq -e '.type == "mastodon" and .source == "nodeinfo" and (.total_users | type) == "number"'
-
-      - name: Show container logs
-        if: always()
-        run: docker logs smoke || true
-
-      # 直前のビルドと同じ builder なのでレイヤはキャッシュから再利用され、検証したものと同じ中身が push される。
-      - name: Push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true,compression=zstd,compression-level=3
 
-  create-k8s-pr:
-    # ビルド（スモークテスト込み）と CI が両方成功したときだけ k8s マニフェストへ PR する。
-    # k8sg1-repo は Flux 同期なので、この PR のマージがそのままデプロイになる。
-    needs: [build-and-push, checks]
+  # GitHub Release をタグごと（パッチも含む）に作る。全検査が通ったときだけ＝Release がある版はデプロイしてよい版。
+  # ノートは GitHub の自動生成（前回のタグからマージされた PR の一覧・英語。分類は .github/release.yml）。
+  # 同じノートを create-k8s-pr がデプロイの PR 本文に使う（変更の一覧の出どころを1つにする）。
+  release:
+    needs: [build, checks, smoke]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
-      contents: read
+      # generate-notes API も Release の作成も contents: write が要る
+      contents: write
+    outputs:
+      notes: ${{ steps.notes.outputs.notes }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          path: src
-
-      # 前回のタグからのコミット一覧を PR 本文に載せ、何がデプロイされるかをレビューできるようにする。
-      - name: Collect changes since previous release
-        id: changes
+      # 前回のタグは明示する。省くと GitHub は前回の「Release」を起点にするので、
+      # Release を作っていない範囲があると起点がずれる。
+      - name: Generate release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          PREV_TAG: ${{ needs.build.outputs.prev_tag }}
         run: |
-          cd src
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          args=(-f tag_name="v$VERSION" -f target_commitish="$GITHUB_SHA")
+          if [ -n "$PREV_TAG" ]; then args+=(-f previous_tag_name="$PREV_TAG"); fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" "${args[@]}" --jq .body > "$RUNNER_TEMP/notes.md"
           {
-            echo "prev_tag=${PREV_TAG:-（初回リリース）}"
-            echo "log<<EOF"
-            git log --no-merges --pretty='- %s (%h)' ${PREV_TAG:+"$PREV_TAG"..}HEAD | head -n 30
-            echo "EOF"
+            echo "notes<<NOTES_EOF"
+            cat "$RUNNER_TEMP/notes.md"
+            echo
+            echo "NOTES_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # タグ名は GITHUB_REF_NAME ではなく版から作る（tag-release.yml から呼ばれたときは ref が main のため）
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
+
+  create-k8s-pr:
+    # 検査が全部（ビルド・checks・スモーク）通ったときだけ k8s マニフェストへ PR する（release が同じ条件で
+    # 待っているので、それを待てば足りる）。マニフェストのリポジトリは Flux 同期なので、この PR のマージが
+    # そのまま本番へのデプロイになる。
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      # マニフェストのリポジトリは非公開。このリポジトリの Actions のログは誰でも読めるので、リポジトリ名と
+      # マニフェストのパス（同じイメージを使う prd のもの、スペース区切り）もシークレットに置き、ログでは伏せる
+      K8S_REPO: ${{ secrets.K8SG1_REPO }}
+      K8S_MANIFEST_PATHS: ${{ secrets.K8SG1_MANIFEST_PATHS }}
+
+    steps:
       - name: Checkout k8s repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.K8S_REPO }}
           token: ${{ secrets.K8SG1_PAT }}
           path: k8s-repo
 
-      # マニフェストの置き場所やイメージ名が変わって sed が空振りしたら、空の PR を作らずに落とす。
+      # マニフェストの書式が変わって sed が何も書き換えないと、差分が無いので create-pull-request は
+      # PR を作らずに黙って成功する（＝デプロイされないのに緑）。書き換わったことを確かめて落とす
       - name: Update image tag
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+        working-directory: k8s-repo
         run: |
-          cd k8s-repo
-          NEW_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.version }}"
-          sed -i -E "s#image: ${{ env.REGISTRY }}/(${{ env.IMAGE_NAME }}|${{ env.LEGACY_IMAGE_NAME }}):.*#image: ${NEW_IMAGE}#" "${{ env.K8S_MANIFEST_PATH }}"
-          grep -q "image: ${NEW_IMAGE}$" "${{ env.K8S_MANIFEST_PATH }}"
+          repo="${IMAGE%:*}"
+          for p in $K8S_MANIFEST_PATHS; do
+            sed -i "s|image: ${repo}:.*|image: ${IMAGE}|" "$p"
+            grep -q "image: ${IMAGE}$" "$p" || { echo "::error file=$p::image line not updated"; exit 1; }
+          done
+
+      # 本文は英語・全アプリ共通の書式（イメージ・ビルドのリンク・release ジョブが生成したノート）。
+      # ノートの PR は完全な URL で書かれるので、マニフェストのリポジトリの #N へのリンクに化けない。
+      # DB は起動時の db:prepare が当てるキャッシュなので、マイグレーションの節は無い。
+      - name: Write PR body
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          NOTES: ${{ needs.release.outputs.notes }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "- Image: \`$IMAGE\`"
+            echo "- Build: $RUN_URL"
+            echo
+            printf '%s\n' "$NOTES"
+          } > "$RUNNER_TEMP/pr-body.md"
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           path: k8s-repo
           token: ${{ secrets.K8SG1_PAT }}
-          branch: update-instance-info-api-${{ needs.build-and-push.outputs.version }}
+          branch: update-instance-info-api-${{ needs.build.outputs.version }}
           delete-branch: true
-          commit-message: "Update instance-info-api to ${{ needs.build-and-push.outputs.version }}"
-          title: "Update instance-info-api to ${{ needs.build-and-push.outputs.version }}"
-          body: |
-            ## Changes
-            - Update image: `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.version }}`
-            - Source: ${{ github.repository }}@${{ github.sha }}
-
-            ### Commits since ${{ steps.changes.outputs.prev_tag }}
-            ${{ steps.changes.outputs.log }}
-
-            ## Migration
-            ✅ 手動マイグレーション不要（SQLite は emptyDir のキャッシュで、起動時の `db:prepare` が適用する）
-
-            ---
-            🤖 Auto-generated by [GitHub Actions](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          labels: |
-            anypost
+          # マニフェストのリポジトリには PR が大量に来るので、自分に assign して「Assigned to you」で見落とさないようにする
+          assignees: ${{ github.repository_owner }}
+          commit-message: Update instance-info-api to ${{ needs.build.outputs.version }}
+          title: Update instance-info-api to ${{ needs.build.outputs.version }}
+          body-path: ${{ runner.temp }}/pr-body.md
+          # app-update: マニフェストのリポジトリに大量に来る PR のうちアプリの版上げを見分ける（全アプリ共通）
+          labels: app-update

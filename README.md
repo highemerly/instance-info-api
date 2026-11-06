@@ -198,30 +198,15 @@ The SQLite cache is persisted in the `sqlite_data` named volume.
 
 ## CI / Release
 
-Changes go through pull requests; direct pushes to `main` are rejected. See [docs/development.md](docs/development.md) for the setup and the reasons behind it.
+Changes go through pull requests; direct pushes to `main` are rejected. See [docs/development.md](docs/development.md) for the setup, the CI, the release steps and the reasons behind them.
 
-Every push to any branch runs the test suite and `bundle-audit` (`.github/workflows/ci.yml`).
 CI sets `LIVE_NODEINFO_HOST=handon.club`, so `test/integration/live_nodeinfo_test.rb` also does a real nodeinfo lookup against that Mastodon server. Locally the test is skipped unless you set the variable:
 
 ```
 $ LIVE_NODEINFO_HOST=handon.club bin/rails test
 ```
 
-To release, push a `v*` tag:
-
-```
-$ git tag v1.0.0
-$ git push origin v1.0.0
-```
-
-`.github/workflows/docker-build.yml` then:
-
-1. Runs the same checks in parallel with the image build.
-2. Builds `ghcr.io/highemerly/instance-info-api` for `linux/amd64` with `--pull --no-cache`, so OS security updates are always picked up, and smoke-tests the image.
-3. Pushes it as `1.0.0`, `1.0` and `latest`.
-4. Opens a PR against `highemerly/k8sg1-repo` that bumps `manifests/anypost/prd/api.yaml`. Flux deploys it once the PR is merged. (The k8s resources keep their `anypost-api` names; images were published as `ghcr.io/highemerly/anypost-api` until 1.0.0.)
-
-To rebuild without a new tag (e.g. to pick up base image security fixes), run the workflow manually from the Actions tab with a tag name such as `v1.0.1`. Opening the k8sg1-repo PR needs the `K8SG1_PAT` repository secret.
+Releases are tagged `vX.Y.Z` (from the **Tag a release** workflow in the Actions tab, or by pushing a tag). Each release runs every check, publishes `ghcr.io/highemerly/instance-info-api` as `X.Y.Z`, `X.Y` and `latest`, smoke-tests that image, and creates a GitHub Release once everything passes. Images were published as `ghcr.io/highemerly/anypost-api` until 1.0.0.
 
 ## License
 

@@ -1,19 +1,20 @@
 name: Checks
 
-# minitest / bundler-audit を回す再利用可能ワークフロー。
-# ci.yml（全ブランチ push）と docker-build.yml（タグ push でビルドと並走）の両方から呼ぶ。
-# CI ステップの単一の定義元。
+# minitest / bundler-audit を回す再利用可能ワークフロー。CI ステップの単一の定義元。
+# ci.yml（ブランチ push）と docker-build.yml（タグ push でビルドと並走）の両方から呼ぶ。
 on:
   workflow_call:
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    # ふだんは 15 秒ほど。固まったときに既定の 6 時間待たない
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Ruby のバージョンは .ruby-version を単一の定義元にする（Gemfile / Dockerfile と揃える）。
       - name: Set up Ruby
@@ -32,7 +33,7 @@ jobs:
           bin/rails db:prepare
           bin/rails test
 
-      # 既知の脆弱性がある gem が lock に残っていたらリリースを止める。
+      # 既知の脆弱性がある gem が lock に残っていたら止める。
       # advisory DB は毎回最新を取るので、コード変更がなくても新規公開分で落ちることがある。
       - name: Audit gems (bundler-audit)
         if: ${{ !cancelled() }}

@@ -1,0 +1,53 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  // docker:pinDigests: ベースイメージ（ruby:X-slim）を digest で固定する。タグのままだと Ruby・Debian の
+  // 更新がリリース時のビルドで無言で入る。固定すると digest の更新が PR になり、CI（smoke）でビルドと起動を
+  // 通してから取り込める。
+  extends: ['config:recommended', 'docker:pinDigests'],
+  timezone: 'Asia/Tokyo',
+  // 週2回にまとめる（毎日 PR が来ると確認が追いつかず、週1だと間隔が空きすぎる）。
+  schedule: ['before 9am on monday and thursday'],
+  // GitHub Release のノートで Dependencies の見出しに分ける（.github/release.yml）。
+  labels: ['dependencies'],
+  // PR を github.com/pulls の「Assigned to you」にまとめる（いくつものリポジトリから来るので見落とさない）。
+  // （自動マージにする PR は既定で assign されず、自動マージに失敗したときだけ assign される）
+  assignees: ['highemerly'],
+  // 間接依存（Gemfile.lock だけにある版。nokogiri・rack・ethon など）を週1で `bundle lock --update` する。
+  // 直接依存の PR では、その gem が要求する分しか上がらないため。
+  lockFileMaintenance: {
+    enabled: true,
+  },
+  // メジャーはコード側の対応が要ることが多いので、着手するときに Dependency Dashboard で承認して PR を作らせる
+  // （自動で並ぶと、対応できないまま毎週 rebase される PR が溜まる）。
+  major: {
+    dependencyDashboardApproval: true,
+  },
+  packageRules: [
+    {
+      // 乗っ取られて公開された版は数日以内に取り下げられることが多いため、公開から3日待つ。
+      // rubygems に限る（Docker の digest には公開日時が無く、待てないため）。
+      matchDatasources: ['rubygems'],
+      minimumReleaseAge: '3 days',
+    },
+    {
+      // Ruby の版は .ruby-version（CI の setup-ruby もここを読む）・Gemfile の ruby・Dockerfile の
+      // ruby:X-slim を揃えて上げる必要があるため1つの PR にまとめる。
+      matchDepNames: ['ruby'],
+      groupName: 'Ruby',
+    },
+    {
+      // Ruby の 4.0 → 4.1 は Renovate ではマイナーだが、年1回の互換性を崩しうる更新（標準ライブラリの
+      // 切り出しなど）。ネイティブ拡張の gem の対応を待つこともあるので、メジャーと同じく承認制にする。
+      matchDepNames: ['ruby'],
+      matchUpdateTypes: ['minor'],
+      dependencyDashboardApproval: true,
+    },
+    {
+      // Rails の 8.1 → 8.2 も Renovate ではマイナーだが、非推奨の機能が消え、設定の追従
+      // （`rails app:update`・load_defaults）が要る。メジャーと同じく承認制にする。
+      matchPackageNames: ['rails'],
+      matchUpdateTypes: ['minor'],
+      dependencyDashboardApproval: true,
+    },
+  ],
+}

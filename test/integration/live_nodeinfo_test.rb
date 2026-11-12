@@ -10,6 +10,7 @@ class LiveNodeinfoTest < ActionDispatch::IntegrationTest
   setup do
     skip "set LIVE_NODEINFO_HOST to run against a real server" if HOST.blank?
     Typhoeus::Config.block_connection = false
+    SafeHttp.resolver = nil # real DNS, and the real CURLOPT_RESOLVE pin
   end
 
   test "looks up a real Mastodon server via nodeinfo, then serves it from cache" do

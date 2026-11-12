@@ -49,6 +49,25 @@ class InstancesControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "does not fetch a nodeinfo href that points at an internal address" do
+    internal_url = "http://169.254.169.254/nodeinfo/2.0"
+    Typhoeus.stub("https://stale.example#{NodeinfoClient::WELL_KNOWN_PATH}").and_return(
+      json_response(links: [{ rel: "#{NodeinfoClient::NODEINFO_REL_PREFIX}2.0", href: internal_url }])
+    )
+    Typhoeus.stub(internal_url).and_return(json_response(software: { name: "pleroma", version: "1.0" }))
+    requested = []
+    Typhoeus.before { |request| requested << request.base_url; true }
+
+    get "/api/v1/instances/stale.example"
+
+    assert_response :ok
+    assert_equal "cache:cache-stale", response.parsed_body["source"]
+    assert_equal "mastodon", response.parsed_body["software"]
+    assert_not_includes requested, internal_url
+  ensure
+    Typhoeus.before.clear
+  end
+
   private
 
   # If the controller ever consults observer again, it would get "pleroma" and

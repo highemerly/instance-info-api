@@ -7,6 +7,10 @@ require "json"
 # client, though most fediverse instances don't have the Cloudflare bot filter
 # that forces our hand for observer.
 #
+# The domain and the href come from outside, so every fetch goes through
+# SafeHttp (SSRF guard). A blocked target is reported as :no_data — whatever
+# is there, it isn't a public fediverse instance.
+#
 # nodeinfo doesn't expose the observer's `status` integer (which is poduptime
 # monitoring history); the controller emits `status: null` for nodeinfo rows
 # to make that semantic gap explicit to clients.
@@ -32,6 +36,10 @@ module NodeinfoClient
     end
 
     def fetch(domain)
+      unless SafeHttp.valid_hostname?(domain)
+        return blocked(domain, "invalid hostname")
+      end
+
       discovery = get("https://#{domain}#{WELL_KNOWN_PATH}")
 
       # 404 at well-known means "this domain isn't a fediverse instance" —
@@ -54,6 +62,10 @@ module NodeinfoClient
       return SourceResult.new(state: :no_data, http_status: discovery.code) unless nodeinfo_url
 
       parse_document(get(nodeinfo_url))
+    rescue SafeHttp::BlockedError => e
+      blocked(domain, e.message)
+    rescue SafeHttp::ResolveError => e
+      SourceResult.new(state: :unavailable, http_status: 0, error_message: e.message)
     end
 
     private
@@ -66,14 +78,17 @@ module NodeinfoClient
     end
 
     def get(url)
-      Typhoeus.get(
+      SafeHttp.get(
         url,
         headers: { "Accept" => "application/json", "User-Agent" => USER_AGENT },
         timeout: TIMEOUT_SECONDS,
-        connecttimeout: TIMEOUT_SECONDS,
-        followlocation: true,
-        maxredirs: 3
+        max_redirects: 3
       )
+    end
+
+    def blocked(domain, reason)
+      Rails.logger.warn(%(nodeinfo_blocked domain=#{domain.inspect} reason=#{reason.inspect}))
+      SourceResult.new(state: :no_data, error_message: "blocked: #{reason}")
     end
 
     # Highest-version nodeinfo schema wins. Lexical sort works for 1.x/2.x

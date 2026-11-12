@@ -15,8 +15,6 @@ instances = [
   ["line", "line"],
   ["b.hatena.ne.jp", "hatenabookmark"],
   ["hatena.ne.jp", "hatenabookmark"],
-  ["getpocket.com", "pocket"],
-  ["pocket", "pocket"],
   ["linkedin.com", "linkedin"],
   ["www.linkedin.com", "linkedin"],
   ["pinterest.com", "pinterest"],
@@ -40,6 +38,11 @@ instances = [
   ["whatsapp", "whatsapp"],
   ["telegram.org", "telegram"],
   ["telegram", "telegram"],
+  ["www.tumblr.com", "tumblr"],
+  ["tumblr.com", "tumblr"],
+  ["tumblr", "tumblr"],
+  ["taittsuu.com", "taittsuu"],
+  ["taittsuu", "taittsuu"],
 ]
 
 instances.each do |name, type|

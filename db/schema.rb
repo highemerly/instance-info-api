@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_05_13_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_12_120000) do
   create_table "instances", force: :cascade do |t|
     t.string "name"
     t.string "instance_type"
@@ -24,5 +24,4 @@ ActiveRecord::Schema[8.0].define(version: 2026_05_13_140000) do
     t.string "source"
     t.index ["name"], name: "index_instances_on_name", unique: true
   end
-
 end

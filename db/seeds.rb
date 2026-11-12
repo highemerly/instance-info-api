@@ -41,6 +41,8 @@ instances = [
   ["www.tumblr.com", "tumblr"],
   ["tumblr.com", "tumblr"],
   ["tumblr", "tumblr"],
+  ["taittsuu.com", "taittsuu"],
+  ["taittsuu", "taittsuu"],
 ]
 
 instances.each do |name, type|

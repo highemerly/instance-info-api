@@ -30,10 +30,22 @@ misskey:
   - cherrypick
   - meisskey
 
+# Iceshrimp.NET is a rewrite, not a Misskey fork (its nodeinfo name is
+# "Iceshrimp.NET"; the older JS "iceshrimp" above is a Misskey fork).
+iceshrimp.net:
+  - iceshrimp.net
+
 lemmy:
   - lemmy
+
+# Mbin (and kbin, which it forked from) is a link aggregator like Lemmy, but
+# its web UI is different (no /create_post), so it is its own family.
+mbin:
   - mbin
   - kbin
+
+piefed:
+  - piefed
 
 mitra:
   - mitra
@@ -57,6 +69,9 @@ gnusocial:
 
 gotosocial:
   - gotosocial
+
+snac:
+  - snac
 
 funkwhale:
   - funkwhale

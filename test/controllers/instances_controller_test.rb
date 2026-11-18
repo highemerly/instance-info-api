@@ -1,6 +1,8 @@
 require "test_helper"
 
 class InstancesControllerTest < ActionDispatch::IntegrationTest
+  include RemoteStubs
+
   setup do
     Typhoeus::Config.block_connection = true
     SourceFailureTracker.reset!
@@ -24,11 +26,26 @@ class InstancesControllerTest < ActionDispatch::IntegrationTest
     assert_response :bad_request
   end
 
-  test "serves builtin rows without touching upstreams" do
+  test "serves builtin services without touching upstreams or the DB" do
     get "/api/v1/instances/twitter.com"
 
     assert_response :ok
-    assert_equal "builtin", response.parsed_body["source"]
+    assert_equal({ "name" => "twitter.com", "type" => "twitter", "source" => "builtin" }, response.parsed_body)
+    assert_nil Instance.find_by(name: "twitter.com")
+  end
+
+  test "a fresh lookup that finds no nodeinfo is a cached 404" do
+    Typhoeus.stub("https://plain.example#{NodeinfoClient::WELL_KNOWN_PATH}").and_return(Typhoeus::Response.new(code: 404, body: ""))
+
+    get "/api/v1/instances/plain.example"
+
+    assert_response :not_found
+    assert_equal "error:no-data", response.parsed_body["source"]
+
+    get "/api/v1/instances/plain.example"
+
+    assert_response :not_found
+    assert_equal "cache:error:no-data", response.parsed_body["source"]
   end
 
   test "normalizes the name before looking it up" do
@@ -148,21 +165,4 @@ class InstancesControllerTest < ActionDispatch::IntegrationTest
     Typhoeus.stub(FediverseObserverClient::ENDPOINT).and_return(json_response(body))
   end
 
-  def stub_nodeinfo(domain, software:, version:, users:, extra: {})
-    doc_url = "https://#{domain}/nodeinfo/2.0"
-    Typhoeus.stub("https://#{domain}#{NodeinfoClient::WELL_KNOWN_PATH}").and_return(
-      json_response(links: [{ rel: "#{NodeinfoClient::NODEINFO_REL_PREFIX}2.0", href: doc_url }])
-    )
-    Typhoeus.stub(doc_url).and_return(
-      json_response({ software: { name: software, version: version }, usage: { users: { total: users } } }.merge(extra))
-    )
-  end
-
-  def stub_json(url, body)
-    Typhoeus.stub(url).and_return(json_response(body))
-  end
-
-  def json_response(body)
-    Typhoeus::Response.new(code: 200, body: JSON.generate(body))
-  end
 end

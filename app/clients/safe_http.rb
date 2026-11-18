@@ -78,7 +78,7 @@ module SafeHttp
       uri = parse!(url)
       hops = 0
       loop do
-        response = request(uri, headers: headers, timeout: timeout)
+        response = request(uri, method: :get, headers: headers, timeout: timeout)
         location = response.headers&.[]("Location")
         return response unless REDIRECT_CODES.include?(response.code) && location.present?
         return response if hops >= max_redirects
@@ -86,6 +86,12 @@ module SafeHttp
         hops += 1
         uri = parse!(join(uri, location))
       end
+    end
+
+    # Same checks as #get. Redirects aren't followed: a 3xx comes back as is
+    # (we have no need to re-send a body to wherever it points).
+    def post(url, body:, headers: {}, timeout:)
+      request(parse!(url), method: :post, body: body, headers: headers, timeout: timeout)
     end
 
     def valid_hostname?(host)
@@ -122,9 +128,10 @@ module SafeHttp
       raise BlockedError, "invalid redirect location"
     end
 
-    def request(uri, headers:, timeout:)
+    def request(uri, method:, headers:, timeout:, body: nil)
       host = uri.hostname
       options = {
+        method: method,
         headers: headers,
         timeout: timeout,
         connecttimeout: timeout,
@@ -144,8 +151,10 @@ module SafeHttp
         options[:resolve] = pin(host, uri.port, addresses)
       end
 
+      options[:body] = body unless body.nil?
+
       # `options` holds the pinned list's pointer until the request is done.
-      Typhoeus.get(uri.to_s, **options)
+      Typhoeus::Request.new(uri.to_s, **options).run
     end
 
     # Asks DNS for the absolute name ("host."), so the resolv.conf search list

@@ -7,6 +7,8 @@
 SourceResult = Struct.new(
   :state,
   :software, :version, :total_users, :node_status,
+  # nodeinfo only (nil from fediverse.observer):
+  :node_name, :open_registrations, :active_month, :active_halfyear, :local_posts, :max_characters,
   :http_status, :error_message,
   keyword_init: true
 ) do

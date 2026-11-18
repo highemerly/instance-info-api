@@ -113,14 +113,23 @@ module NodeinfoClient
       end
 
       doc = JSON.parse(response.body)
-      software = doc.dig("software", "name")
-      return SourceResult.new(state: :no_data, http_status: response.code) if software.blank?
+      software = JsonFields.text(JsonFields.dig(doc, "software", "name"))
+      return SourceResult.new(state: :no_data, http_status: response.code) if software.nil?
 
+      users = JsonFields.dig(doc, "usage", "users")
       SourceResult.new(
         state: :ok,
         software: software,
-        version: doc.dig("software", "version"),
-        total_users: doc.dig("usage", "users", "total"),
+        version: JsonFields.text(JsonFields.dig(doc, "software", "version")),
+        total_users: JsonFields.count(JsonFields.dig(users, "total")),
+        active_month: JsonFields.count(JsonFields.dig(users, "activeMonth")),
+        active_halfyear: JsonFields.count(JsonFields.dig(users, "activeHalfyear")),
+        local_posts: JsonFields.count(JsonFields.dig(doc, "usage", "localPosts")),
+        open_registrations: JsonFields.boolean(JsonFields.dig(doc, "openRegistrations")),
+        # metadata is free-form; these keys are what Mastodon, Misskey and
+        # GoToSocial (among others) put there.
+        node_name: JsonFields.text(JsonFields.dig(doc, "metadata", "nodeName")),
+        max_characters: JsonFields.limit(JsonFields.dig(doc, "metadata", "maxNoteTextLength")),
         node_status: nil,
         http_status: response.code
       )

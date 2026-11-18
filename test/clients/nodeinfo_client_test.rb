@@ -31,6 +31,32 @@ class NodeinfoClientTest < ActiveSupport::TestCase
     assert_equal ["misskey", "2025.1.0", 7], [result.software, result.version, result.total_users]
   end
 
+  test "reads registrations, activity, posts and metadata from nodeinfo" do
+    stub_well_known("good.example", href: "https://good.example/nodeinfo/2.1")
+    Typhoeus.stub("https://good.example/nodeinfo/2.1").and_return(
+      json(
+        software: { name: "misskey", version: "2025.4.1" },
+        openRegistrations: false,
+        usage: { users: { total: 744876, activeMonth: 1000, activeHalfyear: nil }, localPosts: 183922605 },
+        metadata: { nodeName: " Misskey.io ", maxNoteTextLength: 3000 }
+      )
+    )
+
+    result = @backend.fetch("good.example")
+
+    assert result.ok?
+    assert_equal [false, 744876, 1000, nil, 183922605, "Misskey.io", 3000],
+                 [result.open_registrations, result.total_users, result.active_month, result.active_halfyear,
+                  result.local_posts, result.node_name, result.max_characters]
+  end
+
+  test "treats a nodeinfo document that isn't an object as no data" do
+    stub_well_known("odd.example", href: "https://odd.example/nodeinfo/2.0")
+    Typhoeus.stub("https://odd.example/nodeinfo/2.0").and_return(Typhoeus::Response.new(code: 200, body: "[1, 2]"))
+
+    assert @backend.fetch("odd.example").no_data?
+  end
+
   test "does not follow a nodeinfo href that points at an internal address" do
     stub_well_known("evil.example", href: INTERNAL_URL)
 

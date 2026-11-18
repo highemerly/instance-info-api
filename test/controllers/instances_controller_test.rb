@@ -88,6 +88,38 @@ class InstancesControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "stores nodeinfo extras and the instance API's details on a fresh lookup" do
+    stub_nodeinfo("new.example", software: "mastodon", version: "4.5.0", users: 42,
+                  extra: { openRegistrations: true, metadata: { nodeName: "New" } })
+    stub_json("https://new.example/api/v2/instance",
+      configuration: { statuses: { max_characters: 500 } },
+      thumbnail: { url: "https://new.example/t.png" },
+      icon: [{ src: "https://new.example/i.png", size: "192x192" }])
+
+    get "/api/v1/instances/new.example"
+
+    assert_response :ok
+    assert_equal "nodeinfo", response.parsed_body["source"]
+    row = Instance.find_by!(name: "new.example")
+    assert_equal ["New", true, 500, "https://new.example/t.png", "https://new.example/i.png"],
+                 [row.node_name, row.open_registrations, row.max_characters, row.thumbnail_url, row.icon_url]
+  end
+
+  test "a refresh keeps the stored details when the instance API doesn't answer" do
+    Instance.find_by!(name: "stale.example").update_columns(
+      max_characters: 500, thumbnail_url: "https://stale.example/t.png", icon_url: "https://stale.example/i.png"
+    )
+    stub_nodeinfo("stale.example", software: "mastodon", version: "4.5.0", users: 42)
+    Typhoeus.stub(%r{stale\.example/api/}).and_return(Typhoeus::Response.new(code: 502, body: ""))
+
+    get "/api/v1/instances/stale.example"
+
+    assert_response :ok
+    row = Instance.find_by!(name: "stale.example")
+    assert_equal ["4.5.0", 500, "https://stale.example/t.png", "https://stale.example/i.png"],
+                 [row.version, row.max_characters, row.thumbnail_url, row.icon_url]
+  end
+
   test "does not fetch a nodeinfo href that points at an internal address" do
     internal_url = "http://169.254.169.254/nodeinfo/2.0"
     Typhoeus.stub("https://stale.example#{NodeinfoClient::WELL_KNOWN_PATH}").and_return(
@@ -116,14 +148,18 @@ class InstancesControllerTest < ActionDispatch::IntegrationTest
     Typhoeus.stub(FediverseObserverClient::ENDPOINT).and_return(json_response(body))
   end
 
-  def stub_nodeinfo(domain, software:, version:, users:)
+  def stub_nodeinfo(domain, software:, version:, users:, extra: {})
     doc_url = "https://#{domain}/nodeinfo/2.0"
     Typhoeus.stub("https://#{domain}#{NodeinfoClient::WELL_KNOWN_PATH}").and_return(
       json_response(links: [{ rel: "#{NodeinfoClient::NODEINFO_REL_PREFIX}2.0", href: doc_url }])
     )
     Typhoeus.stub(doc_url).and_return(
-      json_response(software: { name: software, version: version }, usage: { users: { total: users } })
+      json_response({ software: { name: software, version: version }, usage: { users: { total: users } } }.merge(extra))
     )
+  end
+
+  def stub_json(url, body)
+    Typhoeus.stub(url).and_return(json_response(body))
   end
 
   def json_response(body)

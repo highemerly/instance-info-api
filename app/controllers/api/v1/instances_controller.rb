@@ -74,19 +74,14 @@ module Api
           return wrap_outcome(view)
         end
 
-        type = SoftwareFamilies.normalize(result.software)
         same_software = result.software == instance[:software]
         source = "#{used.name}:#{same_software ? 'cache-revalidated' : 'cache-refleshed'}"
 
         updated_record = Instance.update(
           instance[:id],
           name: instance_name,
-          instance_type: type,
-          software: result.software,
-          version: result.version,
-          total_users: result.total_users,
-          status: result.node_status,
-          source: used.name
+          source: used.name,
+          **fetched_attributes(result, instance_name, previous: instance)
         )
 
         wrap_outcome(view_from_result(instance_name, result, source: source, instance_updated_at: updated_record.updated_at))
@@ -109,18 +104,38 @@ module Api
           return wrap_outcome(blank_view(instance_name, instance_type: "unknown", source: "error:no-data", instance_updated_at: created_record.updated_at))
         end
 
-        type = SoftwareFamilies.normalize(result.software)
         created_record = upsert_instance(
           name: instance_name,
-          instance_type: type,
+          source: used.name,
+          **fetched_attributes(result, instance_name)
+        )
+
+        wrap_outcome(view_from_result(instance_name, result, source: used.name, instance_updated_at: created_record.updated_at))
+      end
+
+      # Columns for a row from a successful fetch: the nodeinfo result plus the
+      # software's instance API (InstanceDetailsClient). When that API didn't
+      # answer this time, a refresh falls back to the values the row already
+      # had rather than blanking them over a passing failure.
+      def fetched_attributes(result, instance_name, previous: nil)
+        details = InstanceDetailsClient.fetch(instance_name, software: result.software)
+        kept = ->(column) { previous && !details.reached ? previous[column] : nil }
+
+        {
+          instance_type: SoftwareFamilies.normalize(result.software),
           software: result.software,
           version: result.version,
           total_users: result.total_users,
           status: result.node_status,
-          source: used.name
-        )
-
-        wrap_outcome(view_from_result(instance_name, result, source: used.name, instance_updated_at: created_record.updated_at))
+          node_name: result.node_name || details.node_name || kept.(:node_name),
+          open_registrations: result.open_registrations,
+          active_month: result.active_month,
+          active_halfyear: result.active_halfyear,
+          local_posts: result.local_posts,
+          max_characters: details.max_characters || result.max_characters || kept.(:max_characters),
+          thumbnail_url: details.thumbnail_url || kept.(:thumbnail_url),
+          icon_url: details.icon_url || kept.(:icon_url)
+        }
       end
 
       # Returns [result, backend] for the first backend that produced :ok or

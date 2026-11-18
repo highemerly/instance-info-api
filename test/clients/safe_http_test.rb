@@ -63,6 +63,26 @@ class SafeHttpTest < ActiveSupport::TestCase
     assert_empty @requests
   end
 
+  test "post sends the body to a public host and doesn't follow redirects" do
+    SafeHttp.resolver = ->(_host) { [FAKE_PUBLIC_ADDRESS] }
+    Typhoeus.stub("https://k.example/api/meta").and_return(
+      Typhoeus::Response.new(code: 302, headers: { "Location" => "https://elsewhere.example/" })
+    )
+
+    response = SafeHttp.post("https://k.example/api/meta", body: "{}", timeout: 1)
+
+    assert_equal 302, response.code
+    assert_equal 1, @requests.size
+    assert_equal [:post, "{}"], [@requests.first.options[:method], @requests.first.options[:body]]
+  end
+
+  test "post refuses internal addresses" do
+    SafeHttp.resolver = ->(_host) { ["10.0.0.5"] }
+
+    assert_raises(SafeHttp::BlockedError) { SafeHttp.post("https://k.example/api/meta", body: "{}", timeout: 1) }
+    assert_empty @requests
+  end
+
   test "raises ResolveError when the host doesn't resolve" do
     SafeHttp.resolver = ->(_host) { [] }
 

@@ -31,6 +31,45 @@ class InstancesControllerTest < ActionDispatch::IntegrationTest
     assert_equal "builtin", response.parsed_body["source"]
   end
 
+  test "normalizes the name before looking it up" do
+    ["TWITTER.COM", "twitter.com.", "twitter.com:443", "@alice@Twitter.com"].each do |input|
+      get "/api/v1/instances/#{ERB::Util.url_encode(input)}"
+
+      assert_response :ok, input
+      assert_equal "twitter.com", response.parsed_body["name"], input
+      assert_equal "builtin", response.parsed_body["source"], input
+    end
+  end
+
+  test "rejects names that can't be a hostname" do
+    get "/api/v1/instances/twitter.com:8443"
+
+    assert_response :bad_request
+    assert_equal "error:invalid-name", response.parsed_body["source"]
+    assert_equal "twitter.com:8443", response.parsed_body["name"]
+  end
+
+  test "reports a domain that doesn't resolve as a DNS error, without caching it" do
+    SafeHttp.resolver = ->(_host) { [] }
+
+    get "/api/v1/instances/gone.example"
+
+    assert_response :bad_request
+    assert_equal "error:dns-error", response.parsed_body["source"]
+    assert_nil Instance.find_by(name: "gone.example")
+    assert_empty SourceFailureTracker.snapshot
+  end
+
+  test "keeps serving a stale row when its domain stops resolving" do
+    SafeHttp.resolver = ->(_host) { [] }
+
+    get "/api/v1/instances/stale.example"
+
+    assert_response :ok
+    assert_equal "cache:fediverse.observer:stale-fallback", response.parsed_body["source"]
+    assert_equal "mastodon", response.parsed_body["software"]
+  end
+
   [nil, "nodeinfo"].each do |source|
     test "refreshes stale rows from nodeinfo only (source=#{source.inspect})" do
       stub_observer_with_software("pleroma")

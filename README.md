@@ -32,6 +32,22 @@ Example of response:
 
 `{"name":"twitter.com","type":"twitter","updated_at":"2026-05-13T03:21:00Z","source":"builtin"}`
 
+### Instance name
+
+`<instance-name>` is normalized before lookup, and the response's `name` is the
+normalized form:
+
+| Input                                         | Looked up as         |
+| --------------------------------------------- | -------------------- |
+| `Mastodon.Social`, `mastodon.social.`, `mastodon.social:443` | `mastodon.social` |
+| `@alice@mastodon.social`, `alice@mastodon.social` | `mastodon.social` (the handle's domain; WebFinger is not consulted) |
+| `ｍａｓｔｏｄｏｎ．ｓｏｃｉａｌ` (fullwidth)        | `mastodon.social`    |
+| `例え.jp` (IDN)                                | `xn--r8jz45g.jp`     |
+
+A port other than 443, or anything that isn't a hostname after this, returns
+HTTP 400 with `source` `error:invalid-name`. URLs aren't accepted (the path
+can't carry `/`); pass the host. A leading `www.` is kept as is.
+
 `type` is the canonical fediverse family (e.g. `mastodon`, `pleroma`, `misskey`,
 `lemmy`). `software` is the specific implementation as reported by the
 instance's nodeinfo `software.name` (e.g. `akkoma`, `firefish`, `sharkey`,
@@ -87,6 +103,7 @@ from a cached one.
 | `error:no-data`                               | 404         | Fresh fetch — no upstream had a record for this domain.                  |
 | `cache:error:no-data`                         | 404         | Cached "no data" result, within TTL.                                     |
 | `cache:error:no-data:stale-fallback`          | 404         | Cached "no data" served because every upstream was unavailable.          |
+| `error:invalid-name`                          | 400         | The name isn't a hostname, even after normalization. Not cached.         |
 | `error:dns-error`                             | 400         | Domain failed DNS resolution. Not cached.                                |
 | `error:nodeinfo-unavailable`                  | 503         | The nodeinfo fetch was unavailable (network error, 50x, ...). Not cached. |
 | `cache:fediverse.observer`                    | 200         | Legacy: row cached from fediverse.observer before it shut down, within TTL. |

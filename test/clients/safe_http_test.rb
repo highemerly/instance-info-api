@@ -66,7 +66,8 @@ class SafeHttpTest < ActiveSupport::TestCase
   test "raises ResolveError when the host doesn't resolve" do
     SafeHttp.resolver = ->(_host) { [] }
 
-    assert_raises(SafeHttp::ResolveError) { SafeHttp.get("https://nowhere.example/", timeout: 1) }
+    error = assert_raises(SafeHttp::ResolveError) { SafeHttp.get("https://nowhere.example/", timeout: 1) }
+    assert_equal "nowhere.example", error.host
   end
 
   test "restricts libcurl to http/https, disables its redirects and pins the checked address" do

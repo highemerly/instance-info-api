@@ -42,6 +42,9 @@ gem "graphql-client"
 # from datacenter IP ranges; libcurl produces a fingerprint that passes.
 gem "typhoeus"
 gem "dotenv-rails"
+# Internationalized domain names (例え.jp) to punycode for the instance-name
+# normalizer. Pure Ruby, no libidn.
+gem "simpleidn"
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem

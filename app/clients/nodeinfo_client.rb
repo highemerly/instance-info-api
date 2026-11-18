@@ -65,7 +65,11 @@ module NodeinfoClient
     rescue SafeHttp::BlockedError => e
       blocked(domain, e.message)
     rescue SafeHttp::ResolveError => e
-      SourceResult.new(state: :unavailable, http_status: 0, error_message: e.message)
+      # Only the domain we were asked about makes the lookup :unresolvable; a
+      # nodeinfo href or redirect target that doesn't resolve is that server's
+      # (possibly passing) trouble.
+      state = e.host == domain ? :unresolvable : :unavailable
+      SourceResult.new(state: state, http_status: 0, error_message: e.message)
     end
 
     private

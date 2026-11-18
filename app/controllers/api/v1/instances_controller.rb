@@ -1,7 +1,3 @@
-require "resolv"
-
-NameServer = '8.8.8.8'
-
 module Api
   module V1
     class InstancesController < ApplicationController
@@ -16,7 +12,12 @@ module Api
         backends = backends_for_param(params[:source])
         return render_invalid_source(params[:source]) if backends.nil?
 
-        instance_name = params[:name]
+        instance_name = InstanceName.normalize(params[:name])
+        if instance_name.nil?
+          outcome = wrap_outcome(blank_view(params[:name].to_s, instance_type: "unknown", source: "error:invalid-name"))
+          return render status: outcome[:http_status], json: outcome[:body]
+        end
+
         instance = Instance.find_by(name: instance_name)
 
         outcome =
@@ -58,8 +59,9 @@ module Api
       def refresh_stale(instance, instance_name, backends)
         result, used = try_backends(backends, instance_name)
 
-        if result.nil?
-          # Every backend was :unavailable — keep serving what we have.
+        if result.nil? || result.unresolvable?
+          # Every backend was :unavailable, or the name stopped resolving
+          # (likely passing) — keep serving what we have.
           view = view_from_instance(instance, instance_name, source: stale_fallback_source(instance))
           return wrap_outcome(view)
         end
@@ -91,17 +93,15 @@ module Api
       end
 
       def fresh_lookup(instance_name, backends)
-        begin
-          Resolv::DNS.new(nameserver: NameServer).getaddress(instance_name)
-        rescue
-          return wrap_outcome(blank_view(instance_name, instance_type: "unknown", source: "error:dns-error"))
-        end
-
         result, used = try_backends(backends, instance_name)
 
         if result.nil?
           last_backend = backends.last
           return wrap_outcome(blank_view(instance_name, instance_type: "unknown", source: last_backend.unavailable_source))
+        end
+
+        if result.unresolvable?
+          return wrap_outcome(blank_view(instance_name, instance_type: "unknown", source: "error:dns-error"))
         end
 
         if result.no_data?
@@ -136,6 +136,9 @@ module Api
       end
 
       def record_outcome(backend, result, domain)
+        # A domain that doesn't resolve says nothing about the source's health.
+        return if result.unresolvable?
+
         if result.unavailable?
           SourceFailureTracker.record_failure(
             backend.name,
@@ -259,7 +262,7 @@ module Api
       # came from cache. instance_type == "unknown" backstops the cache-stale
       # case where the source string doesn't carry the original error tag.
       def status_for_response(source, instance_type)
-        return 400 if source.start_with?("error:dns-error")
+        return 400 if source.start_with?("error:invalid-name", "error:dns-error")
         return 503 if source.start_with?("error:") && source.end_with?("-unavailable")
         return 404 if source.include?("error:no-data")
         return 404 if instance_type == "unknown"

@@ -5,6 +5,7 @@ module Api
     # the Pod, so the numbers start over when it's replaced.
     class StatsController < BaseController
       def show
+        cache_publicly(browser: 1.minute, cdn: 5.minutes)
         fediverse = Instance.where.not(instance_type: "unknown")
 
         render json: {

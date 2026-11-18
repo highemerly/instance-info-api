@@ -4,7 +4,8 @@ module Api
     #
     # Every key is always present (null when unknown), so clients get one
     # shape for fediverse servers and builtin services alike. Errors come back
-    # as { domain, error: { code, message } }.
+    # as { domain, error: { code, message } }. A stale row is answered at once
+    # and refreshed in the background (`cache: "stale"`).
     class InstancesController < BaseController
       ERRORS = {
         invalid_name: [400, "not a hostname"],
@@ -14,7 +15,8 @@ module Api
       }.freeze
 
       def show
-        result = InstanceLookup.new.call(params[:name])
+        result = InstanceLookup.new(revalidate: :async).call(params[:name])
+        cache_lookup(result)
 
         if result.error
           status, message = ERRORS.fetch(result.error)

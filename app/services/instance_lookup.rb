@@ -2,22 +2,40 @@
 # backends (nodeinfo, plus each software's instance API). The v1 and v2
 # controllers only render the Result differently.
 #
+# A stale row is refreshed in the request (revalidate: :sync, v1), or served
+# as is while InstanceRefreshJob refreshes it (revalidate: :async, v2 —
+# stale-while-revalidate).
+#
 # Result:
-#   name      normalized domain (the raw input when it isn't a hostname)
-#   service   BuiltinServices::Service, for builtin names
-#   record    Instance row, when there is one to show
-#   cache     :builtin | :hit (fresh row) | :miss (fetched now) |
-#             :stale (old row served because the refresh got nothing usable)
-#   error     nil | :invalid_name | :unresolvable | :not_fediverse | :upstream_unavailable
-#   v1_source the v1 `source` string for the same outcome
+#   name        normalized domain (the raw input when it isn't a hostname)
+#   service     BuiltinServices::Service, for builtin names
+#   record      Instance row, when there is one to show
+#   cache       :builtin | :hit (fresh row) | :miss (fetched now) |
+#               :stale (old row: being refreshed in the background, or the
+#               refresh got nothing usable)
+#   error       nil | :invalid_name | :unresolvable | :not_fediverse | :upstream_unavailable
+#   fresh_until when the record goes stale
+#   v1_source   the v1 `source` string for the same outcome
 class InstanceLookup
-  FRESH_FOR = 3.days
-  UNKNOWN_FRESH_FOR = 1.day
+  # A refresh no longer holds up a request (v2), so rows can turn over daily.
+  FRESH_FOR = 1.day
+  # A background refresh claimed this recently isn't claimed again: it's
+  # running, or it failed and we wait before hammering the server again.
+  REFRESH_RETRY_AFTER = 10.minutes
 
-  Result = Struct.new(:name, :service, :record, :cache, :error, :v1_source, keyword_init: true)
+  # What a row says when the domain has no nodeinfo.
+  NOT_FEDIVERSE = {
+    instance_type: "unknown", source: "error:no-data", software: nil, version: "",
+    total_users: nil, status: nil, node_name: nil, open_registrations: nil,
+    active_month: nil, active_halfyear: nil, local_posts: nil,
+    max_characters: nil, thumbnail_url: nil, icon_url: nil
+  }.freeze
 
-  def initialize(backends: [NodeinfoClient::Backend.new])
+  Result = Struct.new(:name, :service, :record, :cache, :error, :fresh_until, :v1_source, keyword_init: true)
+
+  def initialize(backends: [NodeinfoClient::Backend.new], revalidate: :sync)
     @backends = backends
+    @revalidate = revalidate
   end
 
   def call(input)
@@ -30,14 +48,32 @@ class InstanceLookup
     instance = Instance.find_by(name: name)
     if instance.nil?
       fresh_lookup(name)
-    elsif stale?(instance)
-      refresh(instance, name)
-    else
+    elsif !stale?(instance)
       row_result(name, instance, cache: :hit, v1_source: "cache:#{stored_source(instance)}")
+    elsif @revalidate == :async
+      InstanceRefreshJob.perform_later(name) if claim_refresh(instance)
+      row_result(name, instance, cache: :stale, v1_source: "cache:#{stored_source(instance)}:stale-revalidating")
+    else
+      refresh(instance, name)
     end
   end
 
+  # InstanceRefreshJob: refresh the row if it's still stale.
+  def revalidate(name)
+    instance = Instance.find_by(name: name)
+    refresh(instance, name) if instance && stale?(instance)
+  end
+
   private
+
+  # Compare-and-set on refresh_started_at, so of several requests racing on
+  # one stale row only one enqueues the refresh.
+  def claim_refresh(instance)
+    now = Time.current
+    Instance.where(id: instance.id)
+            .where("refresh_started_at IS NULL OR refresh_started_at < ?", now - REFRESH_RETRY_AFTER)
+            .update_all(refresh_started_at: now) == 1
+  end
 
   def fresh_lookup(name)
     result, used = try_backends(name)
@@ -48,7 +84,7 @@ class InstanceLookup
     return Result.new(name: name, error: :unresolvable, v1_source: "error:dns-error") if result.unresolvable?
 
     if result.no_data?
-      record = upsert_instance(name: name, instance_type: "unknown", version: "", source: "error:no-data")
+      record = upsert_instance(name: name, **NOT_FEDIVERSE)
       return row_result(name, record, cache: :miss, v1_source: "error:no-data")
     end
 
@@ -66,20 +102,25 @@ class InstanceLookup
     end
 
     if result.no_data?
-      # The server no longer serves nodeinfo, but we still have a row. Serve it
-      # marked stale; clients can interpret that however they like.
-      return row_result(name, instance, cache: :stale, v1_source: "cache:cache-stale")
+      # The server no longer serves nodeinfo: it isn't (or is no longer) a
+      # fediverse server, the same as a fresh lookup would conclude.
+      instance.update!(name: name, updated_at: Time.current, **NOT_FEDIVERSE)
+      return row_result(name, instance, cache: :miss, v1_source: "error:no-data")
     end
 
     same_software = result.software == instance[:software]
-    instance.update!(name: name, source: used.name, **fetched_attributes(result, name, previous: instance))
+    # updated_at is set explicitly: when nothing changed, Active Record would
+    # skip the UPDATE and the row would stay stale.
+    instance.update!(name: name, source: used.name, updated_at: Time.current,
+                     **fetched_attributes(result, name, previous: instance))
     row_result(name, instance, cache: :miss,
                v1_source: "#{used.name}:#{same_software ? 'cache-revalidated' : 'cache-refleshed'}")
   end
 
   def row_result(name, record, cache:, v1_source:)
     error = record.instance_type == "unknown" ? :not_fediverse : nil
-    Result.new(name: name, record: record, cache: cache, error: error, v1_source: v1_source)
+    Result.new(name: name, record: record, cache: cache, error: error,
+               fresh_until: record.updated_at + FRESH_FOR, v1_source: v1_source)
   end
 
   # Returns [result, backend] for the first backend that produced anything but
@@ -138,8 +179,7 @@ class InstanceLookup
   end
 
   def stale?(instance)
-    ttl = instance[:instance_type] == "unknown" ? UNKNOWN_FRESH_FOR : FRESH_FOR
-    instance[:updated_at] < ttl.ago
+    instance[:updated_at] < FRESH_FOR.ago
   end
 
   # Rows written before the source column existed came from fediverse.observer.

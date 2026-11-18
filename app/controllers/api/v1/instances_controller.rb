@@ -4,6 +4,8 @@ module Api
     # Renders InstanceLookup's result in the v1 shape (`source` strings,
     # omitted fields, `status`).
     class InstancesController < ApplicationController
+      include CacheHeaders
+
       # fediverse.observer shut down (2026-10), so it's out of the chain and
       # `?source=fediverse.observer` is rejected. FediverseObserverClient is
       # kept in case the service comes back.
@@ -13,10 +15,12 @@ module Api
         response.set_header('Access-Control-Allow-Origin', '*') # (tmp) For debug only
 
         unless [nil, "", "nodeinfo"].include?(params[:source])
+          cache_publicly(browser: 1.minute, cdn: 5.minutes)
           return render status: 400, json: { error: "invalid source", given: params[:source], valid: VALID_SOURCE_PARAMS }
         end
 
-        result = InstanceLookup.new.call(params[:name])
+        result = InstanceLookup.new(revalidate: :sync).call(params[:name])
+        cache_lookup(result)
         view =
           if result.service
             { name: result.name, type: result.service.type }

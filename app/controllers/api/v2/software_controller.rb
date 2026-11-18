@@ -4,6 +4,7 @@ module Api
     # nodeinfo software names folded into each) and the builtin services.
     class SoftwareController < BaseController
       def index
+        cache_publicly(browser: 1.hour, cdn: 1.hour)
         render json: {
           fediverse: SoftwareFamilies::FAMILIES.map { |type, software| { type: type, software: software } },
           services: BuiltinServices::ALL.map do |service|

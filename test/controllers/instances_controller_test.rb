@@ -77,6 +77,20 @@ class InstancesControllerTest < ActionDispatch::IntegrationTest
     assert_empty SourceFailureTracker.snapshot
   end
 
+  test "refreshes in the request (no background job) and sets cache headers" do
+    stub_nodeinfo("stale.example", software: "mastodon", version: "4.0.0", users: 10)
+
+    assert_no_enqueued_jobs do
+      get "/api/v1/instances/stale.example"
+    end
+
+    assert_equal "nodeinfo:cache-revalidated", response.parsed_body["source"]
+    # Nothing changed upstream, but the row is fresh again.
+    assert_operator Instance.find_by!(name: "stale.example").updated_at, :>, 1.minute.ago
+    # Fresh for a day, but the CDN keeps it at most 6 hours.
+    assert_equal "max-age=300, public, s-maxage=21600", response.headers["Cache-Control"]
+  end
+
   test "keeps serving a stale row when its domain stops resolving" do
     SafeHttp.resolver = ->(_host) { [] }
 
@@ -148,9 +162,10 @@ class InstancesControllerTest < ActionDispatch::IntegrationTest
 
     get "/api/v1/instances/stale.example"
 
-    assert_response :ok
-    assert_equal "cache:cache-stale", response.parsed_body["source"]
-    assert_equal "mastodon", response.parsed_body["software"]
+    # A blocked href means no usable nodeinfo: the row becomes "not fediverse".
+    assert_response :not_found
+    assert_equal "error:no-data", response.parsed_body["source"]
+    assert_equal "unknown", Instance.find_by!(name: "stale.example").instance_type
     assert_not_includes requested, internal_url
   ensure
     Typhoeus.before.clear

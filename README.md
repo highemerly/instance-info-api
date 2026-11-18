@@ -66,15 +66,35 @@ Every key is always present; a value that isn't known is `null`.
 | `open_registrations` | Whether anyone can sign up. |
 | `usage` | `total_users`, `active_month`, `active_halfyear`, `local_posts` from nodeinfo (Misskey and GoToSocial don't report active users). |
 | `fetched_at` | When the data was fetched from the server. |
-| `cache` | `hit` (from cache), `miss` (fetched now), `stale` (old data: the refresh got nothing usable), `builtin`. |
+| `cache` | `hit` (from cache), `miss` (fetched now), `stale` (past its day; answered as is while it's refreshed in the background), `builtin`. |
 
 Where the fields come from: nodeinfo for `software`, `open_registrations` and
 `usage`; each software's instance API for `max_characters`, `thumbnail_url` and
 `icon_url` (Mastodon-compatible `/api/v2/instance` and `/api/v1/instance`,
 Misskey `/api/meta`, Lemmy `/api/v3/site`, PieFed `/api/alpha/site`, PeerTube
 `/api/v1/config/about`). Software without such an API (Mbin, Hubzilla,
-WriteFreely, ...) gets `null` there. A fetch is cached for 3 days (1 day when
-the server isn't fediverse).
+WriteFreely, ...) gets `null` there.
+
+#### Caching
+
+A fetch is cached for a day. After that, the next request gets the old data at
+once (`cache: "stale"`) and a background job refreshes it
+(stale-while-revalidate); only a server never seen before is fetched while the
+request waits. A failed background refresh is retried after 10 minutes, and a
+server whose nodeinfo is gone becomes `not_fediverse`.
+
+Responses carry `Cache-Control` for browsers (`max-age`) and the CDN
+(`s-maxage`). The CDN never keeps a row past the moment it goes stale here:
+
+| Response | `Cache-Control` |
+| --- | --- |
+| `hit` / `miss` | `max-age=300, public, s-maxage=` time until stale, at most 6 hours |
+| `stale` | `max-age=0, public, s-maxage=60` |
+| `builtin`, `/software` | `max-age=3600, public, s-maxage=3600` |
+| `not_fediverse` | `max-age=300, public, s-maxage=` time until stale, at most 1 hour |
+| `invalid_name`, `unresolvable` | `max-age=60, public, s-maxage=300` |
+| `upstream_unavailable` | `no-store` |
+| `/stats` | `max-age=60, public, s-maxage=300` |
 
 Errors:
 
@@ -155,6 +175,7 @@ down in October 2026; `?source=fediverse.observer` and any other value return
 HTTP 400 with a JSON body listing the valid options. The observer client is
 kept in the codebase in case the service returns.
 
+v1 refreshes a stale row while the request waits (no background refresh).
 `source` says where the data came from; cached responses prefix the original
 source with `cache:`.
 
@@ -166,8 +187,7 @@ source with `cache:`.
 | `nodeinfo:cache-refleshed`                    | 200         | Stale cache refreshed via nodeinfo; software changed.                    |
 | `cache:nodeinfo`                              | 200         | Cached nodeinfo result, within TTL.                                      |
 | `cache:nodeinfo:stale-fallback`               | 200         | Stale cache served because every refresh attempt was unavailable.        |
-| `cache:cache-stale`                           | 200 / 404   | Stale cache kept after the upstream returned no data (404 when type=unknown). |
-| `error:no-data`                               | 404         | Fresh fetch — no upstream had a record for this domain.                  |
+| `error:no-data`                               | 404         | Fetched now (fresh or refreshing a stale row) — no nodeinfo at this domain. |
 | `cache:error:no-data`                         | 404         | Cached "no data" result, within TTL.                                     |
 | `cache:error:no-data:stale-fallback`          | 404         | Cached "no data" served because every upstream was unavailable.          |
 | `error:invalid-name`                          | 400         | The name isn't a hostname, even after normalization. Not cached.         |

@@ -53,6 +53,10 @@ Rails.application.configure do
 
   # Use a real queuing backend for Active Job (and separate queues per environment).
   # config.active_job.queue_adapter     = :resque
+  # Background refreshes (InstanceRefreshJob) run inside the Puma process. The
+  # cache is per Pod, so a durable queue would buy nothing. Two threads; the
+  # DB pool in database.yml leaves room for them.
+  config.active_job.queue_adapter = ActiveJob::QueueAdapters::AsyncAdapter.new(min_threads: 0, max_threads: 2)
   # config.active_job.queue_name_prefix = "instance_info_api_production"
 
   config.action_mailer.perform_caching = false

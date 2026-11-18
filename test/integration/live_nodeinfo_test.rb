@@ -32,4 +32,15 @@ class LiveNodeinfoTest < ActionDispatch::IntegrationTest
     assert_equal "cache:nodeinfo", response.parsed_body["source"]
     assert_equal HOST, response.parsed_body["name"]
   end
+
+  test "v2 returns the instance API's details for a real Mastodon server" do
+    get "/api/v2/instances/#{HOST}"
+
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal ["fediverse", "mastodon", "miss"], body.values_at("kind", "type", "cache")
+    assert_kind_of Integer, body.dig("max_characters", "halfwidth")
+    assert_match(%r{\Ahttps://}, body["thumbnail_url"])
+    assert_kind_of Integer, body.dig("usage", "local_posts")
+  end
 end

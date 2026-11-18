@@ -1,0 +1,96 @@
+# Non-fediverse services AnyPost can share to. Answered from here, without a
+# lookup and without the cache DB.
+#
+#   node_name           display name
+#   domains             names that mean this service, written as
+#                       InstanceName.normalize leaves them (lowercase, punycode).
+#                       Bare words ("line") are aliases clients send.
+#   max_characters      the longest post: `halfwidth` counted in ASCII letters,
+#                       `fullwidth` in CJK characters. Leave it out when unknown.
+#   open_registrations  whether anyone can sign up
+#
+# Changing this file needs no migration; it's read at boot.
+
+twitter:
+  node_name: X
+  domains: [twitter.com, x.com]
+  # Weighted count: CJK and emoji count 2, every URL counts 23.
+  max_characters: { halfwidth: 280, fullwidth: 140 }
+  open_registrations: true
+
+bluesky:
+  node_name: Bluesky
+  domains: [bsky.app, bluesky]
+  max_characters: { halfwidth: 300, fullwidth: 300 }
+  open_registrations: true
+
+threads:
+  node_name: Threads
+  domains: [threads.com, www.threads.com, threads.net, www.threads.net]
+  max_characters: { halfwidth: 500, fullwidth: 500 }
+  open_registrations: true
+
+facebook:
+  node_name: Facebook
+  domains: [facebook.com, www.facebook.com]
+  max_characters: { halfwidth: 63206, fullwidth: 63206 }
+  open_registrations: true
+
+linkedin:
+  node_name: LinkedIn
+  domains: [linkedin.com, www.linkedin.com]
+  max_characters: { halfwidth: 3000, fullwidth: 3000 }
+  open_registrations: true
+
+reddit:
+  node_name: Reddit
+  domains: [reddit.com, www.reddit.com, reddit]
+  # The title; the body is separate.
+  max_characters: { halfwidth: 300, fullwidth: 300 }
+  open_registrations: true
+
+telegram:
+  node_name: Telegram
+  domains: [telegram.org, telegram]
+  max_characters: { halfwidth: 4096, fullwidth: 4096 }
+  open_registrations: true
+
+pinterest:
+  node_name: Pinterest
+  domains: [pinterest.com, www.pinterest.com, pinterest.jp, www.pinterest.jp]
+  max_characters: { halfwidth: 500, fullwidth: 500 }
+  open_registrations: true
+
+taittsuu:
+  node_name: タイッツー
+  domains: [taittsuu.com, taittsuu]
+  # Regular posts; long posts ("がっつりタイーツ") go up to about 6,000. URLs
+  # count at their full length.
+  max_characters: { halfwidth: 280, fullwidth: 140 }
+  open_registrations: true
+
+hatenabookmark:
+  node_name: はてなブックマーク
+  domains: [b.hatena.ne.jp, hatena.ne.jp]
+  # Comments are around 100 characters, but how halfwidth counts isn't confirmed.
+  open_registrations: true
+
+line:
+  node_name: LINE
+  domains: [line.me, line]
+  open_registrations: true
+
+whatsapp:
+  node_name: WhatsApp
+  domains: [whatsapp.com, www.whatsapp.com, wa.me, whatsapp]
+  open_registrations: true
+
+tumblr:
+  node_name: Tumblr
+  domains: [tumblr.com, www.tumblr.com, tumblr]
+  open_registrations: true
+
+xing:
+  node_name: XING
+  domains: [xing.com, www.xing.com]
+  open_registrations: true

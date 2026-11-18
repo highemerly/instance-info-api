@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 本番のイメージを起動して、API が答えることを確かめる（smoke.yml から呼ぶ。手元でも同じ）。
-# Puma が起動し、DB 準備（entrypoint の db:prepare + seed）が通ることと、最後に自前の Mastodon
+# Puma が起動し、DB 準備（entrypoint の db:prepare）が通ることと、最後に自前の Mastodon
 # （handon.club）を実際に引き、本番と同じイメージ内の libcurl / DNS 経路で nodeinfo が取れることを見る。
 #
 # 使い方: .github/scripts/smoke.sh <イメージ>   例: docker build -t instance-info-api:smoke . && .github/scripts/smoke.sh instance-info-api:smoke
@@ -43,5 +43,17 @@ expect_status 200 /api/v1/instances/twitter.com
 expect_status 400 '/api/v1/instances/twitter.com?source=fediverse.observer'
 curl -sf "$base/api/v1/instances/handon.club" | tee /dev/stderr \
   | jq -e '.type == "mastodon" and .source == "nodeinfo" and (.total_users | type) == "number"' >/dev/null
+echo
+# v2: 組み込みのサービス（DB を使わない）と、さっき v1 で引いた handon.club（キャッシュから。
+# 最大文字数・サムネイルは Mastodon の instance API から取れているはず）
+curl -sf "$base/api/v2/instances/x.com" | tee /dev/stderr \
+  | jq -e '.kind == "service" and .max_characters.fullwidth == 140' >/dev/null
+echo
+curl -sf "$base/api/v2/instances/handon.club" | tee /dev/stderr \
+  | jq -e '.kind == "fediverse" and .type == "mastodon" and .cache == "hit"
+           and (.max_characters.halfwidth | type) == "number" and (.thumbnail_url | startswith("https://"))' >/dev/null
+echo
+expect_status 200 /api/v2/software
+curl -sf "$base/api/v2/stats" | jq -e '.instances.fediverse >= 1' >/dev/null && echo "GET /api/v2/stats -> counts handon.club"
 echo
 echo "smoke: OK"

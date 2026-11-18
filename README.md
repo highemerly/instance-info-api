@@ -1,41 +1,97 @@
 # instance-info-api
 
-Get fediverse server type by REST API.
-
-- Return instance type (e.g. mastodon, misskey, friendica, pixelfed, ...)
-- Return the specific software fork in a separate `software` field (e.g. `type=pleroma, software=akkoma`)
-- Return software version, total users, and status for fediverse instances
-- Support some non-fediverse SNS (e.g. twitter, facebook, ...)
-- Create cache
+Tell what a fediverse server (or a well-known SNS) is, by REST API: its type
+(mastodon, misskey, lemmy, ...), name, post length limit, thumbnail and icon,
+registration status and activity. Results are cached.
 
 ## Request to hosted services
 
 ```
-GET https://anypost.dev/api/v1/instances/<instance-name>
+GET https://anypost.dev/api/v2/instances/<instance-name>
+GET https://anypost.dev/api/v2/software
+GET https://anypost.dev/api/v2/stats
 ```
 
-Example of response:
+`/api/v1/instances/<instance-name>` still works but is deprecated; see
+[v1](#v1-deprecated) below.
 
-- GET https://anypost.dev/api/v1/instances/mastodon.cloud
+### `GET /api/v2/instances/<instance-name>`
 
-`{"name":"mastodon.cloud","type":"mastodon","software":"mastodon","version":"4.3.2","total_users":12345,"status":null,"updated_at":"2026-05-13T03:21:00Z","source":"cache:nodeinfo"}`
+```json
+{
+  "domain": "misskey.io",
+  "kind": "fediverse",
+  "type": "misskey",
+  "software": { "name": "misskey", "version": "2025.4.1-io.12b" },
+  "node_name": "Misskey.io",
+  "thumbnail_url": "https://media.misskeyusercontent.jp/misskey/65b25d3c-....jpg",
+  "icon_url": "https://media.misskeyusercontent.jp/io/2f626cae-....png",
+  "max_characters": { "halfwidth": 3000, "fullwidth": 3000 },
+  "open_registrations": false,
+  "usage": { "total_users": 744876, "active_month": null, "active_halfyear": null, "local_posts": 183922605 },
+  "fetched_at": "2026-11-19T03:21:00Z",
+  "cache": "hit"
+}
+```
 
-- GET https://anypost.dev/api/v1/instances/misskey.io
+```json
+{
+  "domain": "x.com",
+  "kind": "service",
+  "type": "twitter",
+  "software": null,
+  "node_name": "X",
+  "thumbnail_url": null,
+  "icon_url": null,
+  "max_characters": { "halfwidth": 280, "fullwidth": 140 },
+  "open_registrations": true,
+  "usage": null,
+  "fetched_at": null,
+  "cache": "builtin"
+}
+```
 
-`{"name":"misskey.io","type":"misskey","software":"misskey","version":"2025.3.1","total_users":98765,"status":null,"updated_at":"2026-05-13T03:21:00Z","source":"nodeinfo"}`
+Every key is always present; a value that isn't known is `null`.
 
-- GET https://anypost.dev/api/v1/instances/some-akkoma-instance.example
+| Key | Meaning |
+| --- | --- |
+| `domain` | The instance name after [normalization](#instance-name). |
+| `kind` | `fediverse`, or `service` for a builtin non-fediverse SNS ([config/builtin_services.yml](config/builtin_services.yml)). |
+| `type` | The fediverse family (`mastodon`, `pleroma`, `misskey`, `lemmy`, ...), or the service. Forks are folded into their family by [config/software_families.yml](config/software_families.yml); unmapped software keeps its own name. |
+| `software` | `name` and `version` from nodeinfo's `software` (e.g. `akkoma` under `type` `pleroma`). |
+| `node_name` | The server's display name. |
+| `thumbnail_url` | A wide banner image (Mastodon's thumbnail, Misskey's banner, ...). |
+| `icon_url` | A square icon; of several sizes, the smallest at least 192px wide. |
+| `max_characters` | The longest post. `halfwidth` counts ASCII letters, `fullwidth` CJK characters; they differ only where a CJK character counts double (X, タイッツー). |
+| `open_registrations` | Whether anyone can sign up. |
+| `usage` | `total_users`, `active_month`, `active_halfyear`, `local_posts` from nodeinfo (Misskey and GoToSocial don't report active users). |
+| `fetched_at` | When the data was fetched from the server. |
+| `cache` | `hit` (from cache), `miss` (fetched now), `stale` (old data: the refresh got nothing usable), `builtin`. |
 
-`{"name":"some-akkoma-instance.example","type":"pleroma","software":"akkoma","version":"3.x","total_users":42,"status":null,"updated_at":"2026-05-13T03:21:00Z","source":"nodeinfo"}`
+Where the fields come from: nodeinfo for `software`, `open_registrations` and
+`usage`; each software's instance API for `max_characters`, `thumbnail_url` and
+`icon_url` (Mastodon-compatible `/api/v2/instance` and `/api/v1/instance`,
+Misskey `/api/meta`, Lemmy `/api/v3/site`, PieFed `/api/alpha/site`, PeerTube
+`/api/v1/config/about`). Software without such an API (Mbin, Hubzilla,
+WriteFreely, ...) gets `null` there. A fetch is cached for 3 days (1 day when
+the server isn't fediverse).
 
-- GET https://anypost.dev/api/v1/instances/twitter.com
+Errors:
 
-`{"name":"twitter.com","type":"twitter","updated_at":"2026-05-13T03:21:00Z","source":"builtin"}`
+```json
+{ "domain": "example.com", "error": { "code": "not_fediverse", "message": "no nodeinfo; not a fediverse server" } }
+```
+
+| `error.code` | HTTP | Meaning |
+| --- | --- | --- |
+| `invalid_name` | 400 | Not a hostname, even after normalization. |
+| `unresolvable` | 404 | The domain doesn't resolve. Not cached. |
+| `not_fediverse` | 404 | No nodeinfo at the domain. Cached for a day. |
+| `upstream_unavailable` | 503 | The server couldn't be reached. Not cached. |
 
 ### Instance name
 
-`<instance-name>` is normalized before lookup, and the response's `name` is the
-normalized form:
+`<instance-name>` is normalized before lookup (in v1 too):
 
 | Input                                         | Looked up as         |
 | --------------------------------------------- | -------------------- |
@@ -44,56 +100,67 @@ normalized form:
 | `ｍａｓｔｏｄｏｎ．ｓｏｃｉａｌ` (fullwidth)        | `mastodon.social`    |
 | `例え.jp` (IDN)                                | `xn--r8jz45g.jp`     |
 
-A port other than 443, or anything that isn't a hostname after this, returns
-HTTP 400 with `source` `error:invalid-name`. URLs aren't accepted (the path
-can't carry `/`); pass the host. A leading `www.` is kept as is.
+A port other than 443, or anything that isn't a hostname after this, is
+`invalid_name`. URLs aren't accepted (the path can't carry `/`); pass the host.
+A leading `www.` is kept as is.
 
-`type` is the canonical fediverse family (e.g. `mastodon`, `pleroma`, `misskey`,
-`lemmy`). `software` is the specific implementation as reported by the
-instance's nodeinfo `software.name` (e.g. `akkoma`, `firefish`, `sharkey`,
-`fedibird`). When a fork is not yet mapped in `config/software_families.yml`,
-`type` falls back to the raw software name so no information is lost.
+### `GET /api/v2/software`
 
-`version` and `total_users` come from nodeinfo's `software.version` and
-`usage.users.total`. These fields, along with `software`, are omitted from the
-response when not available (e.g. non-fediverse cached entries such as
-`twitter.com`).
+The fediverse families and the software names folded into each, and the builtin
+services with their domains and limits:
 
-`status` is always `null` for nodeinfo-sourced data — nodeinfo doesn't expose
-a monitoring history, so the field is emitted as `null` instead of being
-omitted, to make the gap explicit. Rows cached from fediverse.observer (see
-below) still carry its integer status (`1` = up) until they are refreshed.
-
-`updated_at` is the ISO 8601 timestamp of when this row was last written in our
-cache database — i.e. when the data was last fetched upstream (or, for builtin
-entries, when seeds were loaded). It is omitted only when there is no cache row
-(e.g. a DNS error path that never persists).
-
-### Data source
-
-Live lookups fetch the instance's nodeinfo directly
-(`/.well-known/nodeinfo`, then the highest-version schema document it links).
-`?source=nodeinfo` is accepted for compatibility and behaves the same as the
-default.
-
-```
-GET /api/v1/instances/<name>?source=nodeinfo
+```json
+{
+  "fediverse": [{ "type": "mastodon", "software": ["mastodon", "hometown", "glitch-soc", "fedibird"] }, ...],
+  "services": [{ "type": "twitter", "node_name": "X", "domains": ["twitter.com", "x.com"],
+                 "max_characters": { "halfwidth": 280, "fullwidth": 140 }, "open_registrations": true }, ...]
+}
 ```
 
-fediverse.observer shut down in October 2026 and is no longer queried.
-`?source=fediverse.observer` and any other value return HTTP 400 with a JSON
-body listing the valid options. The observer client is kept in the codebase in
-case the service returns.
+### `GET /api/v2/stats`
 
-### `source` values and HTTP status codes
+Counts of what the cache holds — the servers looked up through this API, not
+the whole fediverse. The cache belongs to the Pod and starts over when the Pod
+is replaced; `since` is its oldest entry.
 
-`source` describes where the response data came from. Cached responses prefix
-the original source with `cache:` so clients can distinguish a fresh fetch
-from a cached one.
+```json
+{
+  "pod": "instance-info-api-5d9c...",
+  "generated_at": "2026-11-19T03:21:00Z",
+  "since": "2026-11-12T10:00:00Z",
+  "instances": { "fediverse": 1234, "not_fediverse": 56 },
+  "types": { "mastodon": 800, "misskey": 300, ... },
+  "software": { "mastodon": 700, "misskey": 200, "sharkey": 60, ... }
+}
+```
+
+### v1 (deprecated)
+
+```
+GET https://anypost.dev/api/v1/instances/<instance-name>
+```
+
+`{"name":"misskey.io","type":"misskey","software":"misskey","version":"2025.3.1","total_users":98765,"status":null,"updated_at":"2026-05-13T03:21:00Z","source":"nodeinfo"}`
+
+`{"name":"twitter.com","type":"twitter","source":"builtin"}`
+
+v1 returns `name`, `type`, `software`, `version`, `total_users`, `status`,
+`updated_at` and `source`, omitting the ones that aren't available (builtin
+services have only `name`, `type` and `source`). For an unknown server
+`software` and `version` are `"unknown"`. `status` is always `null` for
+nodeinfo data; rows cached from fediverse.observer carried its integer status.
+
+`?source=nodeinfo` is accepted and changes nothing. fediverse.observer shut
+down in October 2026; `?source=fediverse.observer` and any other value return
+HTTP 400 with a JSON body listing the valid options. The observer client is
+kept in the codebase in case the service returns.
+
+`source` says where the data came from; cached responses prefix the original
+source with `cache:`.
 
 | `source`                                      | HTTP status | Meaning                                                                  |
 | --------------------------------------------- | ----------- | ------------------------------------------------------------------------ |
-| `builtin`                                     | 200         | Hard-coded non-fediverse entry (e.g. twitter.com).                       |
+| `builtin`                                     | 200         | Builtin non-fediverse service (e.g. twitter.com).                        |
 | `nodeinfo`                                    | 200         | Fresh fetch via direct nodeinfo.                                         |
 | `nodeinfo:cache-revalidated`                  | 200         | Stale cache refreshed via nodeinfo; software unchanged.                  |
 | `nodeinfo:cache-refleshed`                    | 200         | Stale cache refreshed via nodeinfo; software changed.                    |

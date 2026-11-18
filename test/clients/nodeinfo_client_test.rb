@@ -69,10 +69,17 @@ class NodeinfoClientTest < ActiveSupport::TestCase
     assert_empty @requested
   end
 
-  test "reports an unresolvable domain as unavailable" do
+  test "reports a domain that doesn't resolve as unresolvable" do
     SafeHttp.resolver = ->(_host) { [] }
 
-    assert @backend.fetch("gone.example").unavailable?
+    assert @backend.fetch("gone.example").unresolvable?
+  end
+
+  test "reports a nodeinfo href whose host doesn't resolve as unavailable" do
+    SafeHttp.resolver = ->(host) { host == "gone.example" ? [] : [FAKE_PUBLIC_ADDRESS] }
+    stub_well_known("good.example", href: "https://gone.example/nodeinfo/2.0")
+
+    assert @backend.fetch("good.example").unavailable?
   end
 
   private

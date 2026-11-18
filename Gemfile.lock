@@ -224,6 +224,7 @@ GEM
     reline (0.7.0)
       io-console (~> 0.5)
     securerandom (0.4.1)
+    simpleidn (0.3.0)
     sqlite3 (2.10.2-aarch64-linux-gnu)
     sqlite3 (2.10.2-aarch64-linux-musl)
     sqlite3 (2.10.2-arm-linux-gnu)
@@ -264,6 +265,7 @@ DEPENDENCIES
   graphql-client
   puma (~> 8.0)
   rails (~> 8.1.0)
+  simpleidn
   sqlite3 (~> 2.1)
   typhoeus
   tzinfo-data

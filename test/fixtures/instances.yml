@@ -7,8 +7,7 @@ twitter:
   source: builtin
 
 # Past the 3-day TTL, so a request refreshes it upstream. Lets controller
-# tests exercise the backend chain without the DNS pre-check that fresh
-# lookups do.
+# tests exercise the refresh path of the backend chain.
 stale_mastodon:
   name: stale.example
   instance_type: mastodon

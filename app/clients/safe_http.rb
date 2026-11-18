@@ -17,6 +17,8 @@ require "typhoeus"
 # - The host must resolve only to public addresses. The addresses we checked
 #   are pinned with CURLOPT_RESOLVE, so libcurl can't re-resolve the name to
 #   something else between our check and the connect (DNS rebinding).
+# - This lookup is the only one: callers learn that a name doesn't resolve
+#   from ResolveError (which carries the host), not from a separate pre-check.
 #
 # Typhoeus reuses curl handles, so a keep-alive connection to the same
 # host:port can win over a newer pin. That connection was opened to an address
@@ -25,8 +27,17 @@ require "typhoeus"
 module SafeHttp
   # The target is not allowed (bad scheme/URL, or a non-public address).
   class BlockedError < StandardError; end
-  # The host didn't resolve. Transient as far as callers are concerned.
-  class ResolveError < StandardError; end
+  # The host didn't resolve (no such name, or the DNS didn't answer in time).
+  # `host` tells callers whether it was the name they asked for or a host
+  # further along (a nodeinfo href, a redirect target).
+  class ResolveError < StandardError
+    attr_reader :host
+
+    def initialize(host)
+      @host = host
+      super("could not resolve #{host}")
+    end
+  end
 
   ALLOWED_SCHEMES = %w[http https].freeze
   CURL_PROTOCOLS = %i[http https].freeze
@@ -35,6 +46,9 @@ module SafeHttp
   # names like "2130706433" or "0x7f.1" as IPv4, which would sidestep the pin.
   HOSTNAME = /\A([a-z0-9_-]+\.)*[a-z][a-z0-9-]*\z/i
   MAX_HOSTNAME_LENGTH = 253
+  # Per query; A and AAAA are asked one after the other. Resolv's default
+  # retries with growing timeouts and can take over a minute on a dead server.
+  DNS_TIMEOUT_SECONDS = 3
 
   # Not reachable from the public internet, or special-purpose. IPv6 forms
   # that embed an IPv4 address are unwrapped first (see EMBEDDED_IPV4).
@@ -55,7 +69,7 @@ module SafeHttp
     attr_writer :resolver
 
     def resolver
-      @resolver ||= ->(host) { Resolv.getaddresses(host) }
+      @resolver ||= method(:resolve)
     end
 
     # Returns the final Typhoeus::Response. After max_redirects hops the last
@@ -124,7 +138,7 @@ module SafeHttp
         raise BlockedError, "non-public address: #{host}" unless public_address?(host)
       else
         addresses = resolver.call(host)
-        raise ResolveError, "could not resolve #{host}" if addresses.blank?
+        raise ResolveError.new(host) if addresses.blank?
         blocked = addresses.reject { |a| public_address?(a) }
         raise BlockedError, "#{host} resolves to non-public address #{blocked.join(', ')}" if blocked.any?
         options[:resolve] = pin(host, uri.port, addresses)
@@ -132,6 +146,17 @@ module SafeHttp
 
       # `options` holds the pinned list's pointer until the request is done.
       Typhoeus.get(uri.to_s, **options)
+    end
+
+    # Asks DNS for the absolute name ("host."), so the resolv.conf search list
+    # isn't tried first: with k8s's ndots:5, "misskey.io" would otherwise be
+    # looked up as misskey.io.<namespace>.svc.cluster.local and so on before
+    # the real name. /etc/hosts is skipped on purpose; nothing we fetch is there.
+    def resolve(host)
+      Resolv::DNS.open do |dns|
+        dns.timeouts = DNS_TIMEOUT_SECONDS
+        dns.getaddresses("#{host}.").map(&:to_s)
+      end
     end
 
     def ip_literal?(host)

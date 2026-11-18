@@ -1,7 +1,7 @@
 require "test_helper"
 
-# End-to-end lookup against a real fediverse server: DNS pre-check, nodeinfo
-# discovery and document fetch over libcurl, then the cache path. Skipped
+# End-to-end lookup against a real fediverse server: SafeHttp's DNS lookup,
+# nodeinfo discovery and document fetch over libcurl, then the cache path. Skipped
 # unless LIVE_NODEINFO_HOST is set, so local `bin/rails test` stays offline;
 # CI points it at handon.club (a Mastodon server we run).
 class LiveNodeinfoTest < ActionDispatch::IntegrationTest
@@ -25,9 +25,11 @@ class LiveNodeinfoTest < ActionDispatch::IntegrationTest
     assert_kind_of Integer, body["total_users"]
     assert body.key?("status") && body["status"].nil?, "nodeinfo rows carry an explicit null status"
 
-    get "/api/v1/instances/#{HOST}"
+    # A differently written name is the same cache row.
+    get "/api/v1/instances/#{HOST.upcase}."
 
     assert_response :ok
     assert_equal "cache:nodeinfo", response.parsed_body["source"]
+    assert_equal HOST, response.parsed_body["name"]
   end
 end

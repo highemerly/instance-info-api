@@ -1,5 +1,8 @@
 module Api
   module V1
+    # Deprecated in favor of /api/v2/instances; kept until clients move over.
+    # Renders InstanceLookup's result in the v1 shape (`source` strings,
+    # omitted fields, `status`).
     class InstancesController < ApplicationController
       # fediverse.observer shut down (2026-10), so it's out of the chain and
       # `?source=fediverse.observer` is rejected. FediverseObserverClient is
@@ -9,210 +12,39 @@ module Api
       def show
         response.set_header('Access-Control-Allow-Origin', '*') # (tmp) For debug only
 
-        backends = backends_for_param(params[:source])
-        return render_invalid_source(params[:source]) if backends.nil?
-
-        instance_name = InstanceName.normalize(params[:name])
-        if instance_name.nil?
-          outcome = wrap_outcome(blank_view(params[:name].to_s, instance_type: "unknown", source: "error:invalid-name"))
-          return render status: outcome[:http_status], json: outcome[:body]
+        unless [nil, "", "nodeinfo"].include?(params[:source])
+          return render status: 400, json: { error: "invalid source", given: params[:source], valid: VALID_SOURCE_PARAMS }
         end
 
-        instance = Instance.find_by(name: instance_name)
-
-        outcome =
-          if instance && !stale_cache?(instance)
-            serve_cached(instance, instance_name)
-          elsif instance
-            refresh_stale(instance, instance_name, backends)
+        result = InstanceLookup.new.call(params[:name])
+        view =
+          if result.service
+            { name: result.name, type: result.service.type }
+          elsif result.record
+            view_from_record(result.record)
           else
-            fresh_lookup(instance_name, backends)
+            { name: result.name, type: "unknown" }
           end
 
-        render status: outcome[:http_status], json: outcome[:body]
+        render status: status_for_response(result.v1_source, view[:type]),
+               json: response_json(**view, source: result.v1_source)
       end
 
       private
 
-      # nil / "nodeinfo" -> nodeinfo only
-      # anything else (incl. "fediverse.observer") -> caller renders 400
-      def backends_for_param(value)
-        case value
-        when nil, "", "nodeinfo"
-          [NodeinfoClient::Backend.new]
-        end
-      end
-
-      def render_invalid_source(value)
-        render status: 400, json: {
-          error: "invalid source",
-          given: value,
-          valid: VALID_SOURCE_PARAMS
-        }
-      end
-
-      def serve_cached(instance, instance_name)
-        view = view_from_instance(instance, instance_name, source: cached_source(instance))
-        wrap_outcome(view)
-      end
-
-      def refresh_stale(instance, instance_name, backends)
-        result, used = try_backends(backends, instance_name)
-
-        if result.nil? || result.unresolvable?
-          # Every backend was :unavailable, or the name stopped resolving
-          # (likely passing) — keep serving what we have.
-          view = view_from_instance(instance, instance_name, source: stale_fallback_source(instance))
-          return wrap_outcome(view)
-        end
-
-        if result.no_data?
-          # Observer/nodeinfo says this domain isn't a known node anymore, but
-          # we still have a cache row. Surface the cached payload with a
-          # cache-stale marker; clients can interpret that however they like.
-          view = view_from_instance(instance, instance_name, source: "cache:cache-stale")
-          return wrap_outcome(view)
-        end
-
-        same_software = result.software == instance[:software]
-        source = "#{used.name}:#{same_software ? 'cache-revalidated' : 'cache-refleshed'}"
-
-        updated_record = Instance.update(
-          instance[:id],
-          name: instance_name,
-          source: used.name,
-          **fetched_attributes(result, instance_name, previous: instance)
-        )
-
-        wrap_outcome(view_from_result(instance_name, result, source: source, instance_updated_at: updated_record.updated_at))
-      end
-
-      def fresh_lookup(instance_name, backends)
-        result, used = try_backends(backends, instance_name)
-
-        if result.nil?
-          last_backend = backends.last
-          return wrap_outcome(blank_view(instance_name, instance_type: "unknown", source: last_backend.unavailable_source))
-        end
-
-        if result.unresolvable?
-          return wrap_outcome(blank_view(instance_name, instance_type: "unknown", source: "error:dns-error"))
-        end
-
-        if result.no_data?
-          created_record = upsert_instance(name: instance_name, instance_type: "unknown", version: "", source: "error:no-data")
-          return wrap_outcome(blank_view(instance_name, instance_type: "unknown", source: "error:no-data", instance_updated_at: created_record.updated_at))
-        end
-
-        created_record = upsert_instance(
-          name: instance_name,
-          source: used.name,
-          **fetched_attributes(result, instance_name)
-        )
-
-        wrap_outcome(view_from_result(instance_name, result, source: used.name, instance_updated_at: created_record.updated_at))
-      end
-
-      # Columns for a row from a successful fetch: the nodeinfo result plus the
-      # software's instance API (InstanceDetailsClient). When that API didn't
-      # answer this time, a refresh falls back to the values the row already
-      # had rather than blanking them over a passing failure.
-      def fetched_attributes(result, instance_name, previous: nil)
-        details = InstanceDetailsClient.fetch(instance_name, software: result.software)
-        kept = ->(column) { previous && !details.reached ? previous[column] : nil }
-
+      def view_from_record(record)
         {
-          instance_type: SoftwareFamilies.normalize(result.software),
-          software: result.software,
-          version: result.version,
-          total_users: result.total_users,
-          status: result.node_status,
-          node_name: result.node_name || details.node_name || kept.(:node_name),
-          open_registrations: result.open_registrations,
-          active_month: result.active_month,
-          active_halfyear: result.active_halfyear,
-          local_posts: result.local_posts,
-          max_characters: details.max_characters || result.max_characters || kept.(:max_characters),
-          thumbnail_url: details.thumbnail_url || kept.(:thumbnail_url),
-          icon_url: details.icon_url || kept.(:icon_url)
+          name: record.name,
+          type: record.instance_type,
+          software: record.software,
+          version: record.version,
+          total_users: record.total_users,
+          status: record.status,
+          updated_at: record.updated_at
         }
       end
 
-      # Returns [result, backend] for the first backend that produced :ok or
-      # :no_data; both terminate the chain (only :unavailable falls through to
-      # the next backend, per the explicit 50x/403-only fallback rule).
-      def try_backends(backends, domain)
-        backends.each do |b|
-          r = b.fetch(domain)
-          record_outcome(b, r, domain)
-          return [r, b] unless r.unavailable?
-        end
-        [nil, nil]
-      end
-
-      def record_outcome(backend, result, domain)
-        # A domain that doesn't resolve says nothing about the source's health.
-        return if result.unresolvable?
-
-        if result.unavailable?
-          SourceFailureTracker.record_failure(
-            backend.name,
-            http_status: result.http_status,
-            message: result.error_message,
-            domain: domain
-          )
-        else
-          SourceFailureTracker.record_success(backend.name, domain: domain)
-        end
-      end
-
-      def view_from_instance(instance, instance_name, source:)
-        {
-          name: instance_name,
-          type: instance[:instance_type],
-          software: instance[:software],
-          version: instance[:version],
-          total_users: instance[:total_users],
-          status: instance[:status],
-          updated_at: instance[:updated_at],
-          source: source
-        }
-      end
-
-      def view_from_result(instance_name, result, source:, instance_updated_at:)
-        {
-          name: instance_name,
-          type: SoftwareFamilies.normalize(result.software),
-          software: result.software,
-          version: result.version,
-          total_users: result.total_users,
-          status: result.node_status,
-          updated_at: instance_updated_at,
-          source: source
-        }
-      end
-
-      def blank_view(instance_name, instance_type:, source:, instance_updated_at: nil)
-        {
-          name: instance_name,
-          type: instance_type,
-          software: nil,
-          version: nil,
-          total_users: nil,
-          status: nil,
-          updated_at: instance_updated_at,
-          source: source
-        }
-      end
-
-      def wrap_outcome(view)
-        {
-          http_status: status_for_response(view[:source], view[:type]),
-          body: response_json(**view)
-        }
-      end
-
-      def response_json(name:, type:, software:, version:, total_users:, status:, updated_at:, source:)
+      def response_json(name:, type:, source:, software: nil, version: nil, total_users: nil, status: nil, updated_at: nil)
         json = { name: name, type: type }
         if type == "unknown"
           json[:software] = "unknown"
@@ -237,53 +69,16 @@ module Api
         json
       end
 
-      # Atomically create or fetch the instance row by name. The DB has a unique
-      # index on `name`, so concurrent requests racing past `find_by` cannot both
-      # insert — the loser gets RecordNotUnique and falls back to the winner's row.
-      def upsert_instance(attrs)
-        Instance.create!(attrs)
-      rescue ActiveRecord::RecordNotUnique
-        Instance.find_by!(name: attrs[:name])
-      end
-
-      def stale_cache?(instance)
-        if instance[:permanent] then
-          false
-        elsif instance[:instance_type] == "unknown" then
-          instance[:updated_at] < Time.current.ago(1.days)
-        else
-          instance[:updated_at] < Time.current.ago(3.days)
-        end
-      end
-
-      # Permanent rows always render as "builtin"; otherwise prefix the original
-      # source recorded at write time with "cache:". Falls back for legacy rows
-      # written before the source column existed.
-      def cached_source(instance)
-        return "builtin" if instance[:permanent]
-        stored = instance[:source].presence || "fediverse.observer"
-        "cache:#{stored}"
-      end
-
-      # Used when refreshing a stale cache fails because every remote source
-      # we tried was unavailable. We still serve the cached payload but flag
-      # the response so clients can tell the data wasn't revalidated.
-      def stale_fallback_source(instance)
-        stored = instance[:source].presence || "fediverse.observer"
-        "cache:#{stored}:stale-fallback"
-      end
-
       # HTTP status is driven by the data nature, not by whether the response
-      # came from cache. instance_type == "unknown" backstops the cache-stale
-      # case where the source string doesn't carry the original error tag.
-      def status_for_response(source, instance_type)
+      # came from cache. type == "unknown" backstops the cache-stale case where
+      # the source string doesn't carry the original error tag.
+      def status_for_response(source, type)
         return 400 if source.start_with?("error:invalid-name", "error:dns-error")
         return 503 if source.start_with?("error:") && source.end_with?("-unavailable")
         return 404 if source.include?("error:no-data")
-        return 404 if instance_type == "unknown"
+        return 404 if type == "unknown"
         200
       end
-
     end
   end
 end

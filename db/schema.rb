@@ -10,14 +10,13 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_19_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_19_130000) do
   create_table "instances", force: :cascade do |t|
     t.string "name"
     t.string "instance_type"
     t.string "version"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.boolean "permanent"
     t.integer "total_users"
     t.integer "status"
     t.string "software"

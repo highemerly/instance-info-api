@@ -1,11 +1,5 @@
 # Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
 
-twitter:
-  name: twitter.com
-  instance_type: twitter
-  permanent: true
-  source: builtin
-
 # Past the 3-day TTL, so a request refreshes it upstream. Lets controller
 # tests exercise the refresh path of the backend chain.
 stale_mastodon:

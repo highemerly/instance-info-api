@@ -50,7 +50,7 @@ gh api -X PUT repos/highemerly/instance-info-api/rulesets/<id> --input .github/r
 | マージ方式 | squash だけ許可 | ruleset と同じ。画面で別の方式を選べないようにする |
 | squash のコミットメッセージ | PR タイトルだけ（本文は空） | ブランチ上の途中のコミットの一覧を main の履歴に持ち込まない |
 | マージ後のブランチ | 自動で削除 | |
-| auto-merge | 有効 | CI が緑になったらマージ、を予約できるようにする |
+| auto-merge | 有効 | Renovate の PR を、CI が緑になったら自動でマージさせる（人の PR も予約できる） |
 
 ## 依存更新（Renovate）
 
@@ -62,27 +62,38 @@ gh api -X PUT repos/highemerly/instance-info-api/rulesets/<id> --input .github/r
 - gem は公開から3日待つ。Docker のベースイメージ（`ruby:X-slim`）は digest で固定し、digest の更新も PR になる
 - Ruby の版（`.ruby-version`・Gemfile の `ruby`・Dockerfile）は1つの PR にまとまる
 - 間接依存（Gemfile.lock だけにある gem）は週1の「Lock file maintenance」の PR でまとめて上がる
-- auto-merge はしない。CI（`ci-result`）が緑なのを見てから squash マージする
+- **マイナー・パッチと `ruby:X-slim` の digest は、CI（`ci-result`）が緑なら自動でマージされる。** 除くのは、下の表で
+  「自動ではマージしない」としたもの（graphql-client・simpleidn。どちらも 0.x）、承認して作らせた Ruby・Rails のマイナー、
+  タグ時にしか動かないワークフロー（docker-build.yml・tag-release.yml）。PR に1つでも除外の更新が入っていれば手でマージする。
+  自動でマージされる PR は assign されない（「Assigned to you」に残るのは手で見るものだけ）
+- メジャー・lockfile の一括更新は手でマージする
+- 自動でマージされても main に入るだけ。本番へはリリース（タグ）とデプロイの PR のマージを経る
 - 脆弱性の修正は3日待ちや週2回の予定を待たずに要ることがある。bundler-audit が赤くなったら
   「CI」の節のとおり手で上げる
+- Dependabot alerts を有効にしてあり（Dependabot 自身の PR は無効のまま）、Renovate がスケジュールと3日待ちを待たずに
+  PR を作る（題名の末尾に `[SECURITY]`）。自動マージの対象かどうかは通常と同じ。
+  **マージしても本番には入らないので、マージしたらパッチ版をリリースする**
 
 ### PR が来たら
+
+自動でマージされなかったもの（assign されて残っているもの）を見る。
 
 1. **Gemfile.lock の差分を見て、実際に入る版が変わるかを確かめる。** Ruby の PR は Gemfile.lock の
    `RUBY VERSION` も変わっているかを見る（変わっていなければ手元で `bundle lock` して足す）
 2. 下の表で、CI が緑でも確かめられていないものに当たるなら、そこだけ手元で見る
-3. マージ後、手元は `git switch main && git pull && bundle install`
+3. マージ後（自動でマージされたものも、作業を始める前に）、手元は `git switch main && git pull && bundle install`
 
 | 依存 | CI で確かめられること | CI では確かめられないこと |
 |---|---|---|
-| rails（と action*・active* 一式）・bootsnap | minitest（コントローラー・モデル）。本番イメージで Puma が起動し、`db:prepare` と seed が通り、API が答える（smoke） | テストの無い経路（ヘルスの `/sources` など）。マイナーは承認制 |
+| rails（と action*・active* 一式）・bootsnap | minitest（コントローラー・モデル）。本番イメージで Puma が起動し、`db:prepare` と seed が通り、API が答える（smoke） | テストの無い経路（ヘルスの `/sources` など）。マイナーは承認制で、承認して作らせた PR も手でマージする |
 | typhoeus・ethon（libcurl） | **minitest ではスタブ**だが、`live_nodeinfo_test.rb`（ランナーの libcurl）と smoke（イメージの libcurl）が handon.club から本物の nodeinfo を取る | handon.club 以外のサーバー（Misskey など）への取得。handon.club が落ちていると CI が赤くなる |
 | sqlite3 | minitest と、イメージでの `db:prepare` | 本番の DB は Pod ごとのキャッシュ（emptyDir）で、起動のたびに作り直されるので、前の版へ戻しても困らない |
 | puma | イメージで起動して答える（smoke） | 本番の負荷・スレッド数での挙動 |
-| graphql・graphql-client | 本番の起動時に読み込めること（smoke） | fediverse.observer の取得（2026-10 から止めている）と `rake swapi:schema:dump`。graphql-client は 0.x なので、0.26 → 0.27 のような上げ方でも互換性を崩しうる（Renovate はメジャー扱いしない） |
+| graphql・graphql-client | 本番の起動時に読み込めること（smoke） | fediverse.observer の取得（2026-10 から止めている）と `rake swapi:schema:dump`。graphql-client は 0.x なので、0.26 → 0.27 のような上げ方でも互換性を崩しうる（Renovate はメジャー扱いしない）。**自動ではマージしない** |
+| simpleidn | minitest（`instance_name_test.rb` が国際化ドメイン名の変換を本物で通す） | 0.x なので、マイナーでも互換性を崩しうる。**自動ではマージしない** |
 | dotenv-rails・debug・tzinfo-data | 起動とテスト | — |
 | Lock file maintenance（nokogiri・rack など間接依存） | minitest・smoke・bundler-audit | — |
-| Ruby の版・Docker の ruby の digest | minitest（setup-ruby が `.ruby-version` を読む）・イメージのビルドと smoke | — （マイナーは承認制） |
+| Ruby の版・Docker の ruby の digest | minitest（setup-ruby が `.ruby-version` を読む）・イメージのビルドと smoke | — （マイナーは承認制で、承認して作らせた PR も手でマージする） |
 | GitHub Actions | checks.yml・smoke.yml で使うもの | **docker-build.yml・tag-release.yml だけで使うもの**（docker/login-action・docker/metadata-action・peter-evans/create-pull-request。リリース時にしか動かない）。マージ後の最初のリリースでログを見る |
 
 ### 承認待ちの片付け

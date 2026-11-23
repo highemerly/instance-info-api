@@ -85,6 +85,13 @@ Rails.application.configure do
     config.logger    = ActiveSupport::TaggedLogging.new(logger)
   end
 
+  # Don't log the liveness/readiness probes. k8s hits each every 30 seconds,
+  # which is well over 99% of the log lines. Errors (and 503s from /ready
+  # raising) are still logged: silence only raises the level to ERROR.
+  # /api/v1/health/sources is left alone; it's for a person to look at.
+  config.middleware.insert_before Rails::Rack::Logger, Rails::Rack::SilenceRequest,
+    path: %r{\A/api/v1/health/(?:live|ready)\z}
+
   # Do not dump schema after migrations.
   config.active_record.dump_schema_after_migration = false
 end
